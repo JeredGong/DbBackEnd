@@ -6,7 +6,7 @@ pub struct Users {
     id: i64,
     username: String,
     password_hash: String,
-    role: char,
+    role: i8,
     image: Vec<u8>
 }
 
