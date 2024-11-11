@@ -29,6 +29,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .service(users::Login)
             .service(users::Register)
+            .service(users::Delete)
     })
     .bind("localhost:9876")?
     .run()

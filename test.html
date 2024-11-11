@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login and Register</title>
+    <title>Login, Register, and Delete Account</title>
 </head>
 <body>
     <!-- Login Form -->
@@ -36,6 +36,10 @@
         <button type="button" onclick="sendRegisterRequest()">Submit</button>
     </form>
 
+    <!-- Delete Account Button -->
+    <h2>Delete Account</h2>
+    <button type="button" onclick="sendDeleteRequest()">Delete Account</button>
+
     <script>
         async function sendLoginRequest() {
             const username = document.getElementById("loginUsername").value;
@@ -57,22 +61,15 @@
                     body: JSON.stringify(data)
                 });
 
-                console.log("Response status:", response.status);
-
                 if (response.ok) {
                     const result = await response.json();
-                    console.log("Login successful:", result);
-
                     document.getElementById("tokenBox").value = result || "No token received";
                     alert("Login successful!");
                 } else {
-                    const errorText = await response.text(); 
-                    console.log("Login failed with error:", errorText);
                     alert("Login failed!");
                 }
             } catch (error) {
                 console.error("Error during login:", error);
-                alert("An error occurred during login. Check console for details.");
             }
         }
 
@@ -84,10 +81,8 @@
             const data = {
                 username: username,
                 password_hash: password,
-                role: isAdmin ? 48 :49  // 设置角色，选中Admin为 '0'，否则为 '1'
+                role: isAdmin ? 0 : 1
             };
-
-            console.log("Sending register request to server with data:", data);
 
             try {
                 const response = await fetch("http://127.0.0.1:9876/register", {
@@ -99,20 +94,36 @@
                     body: JSON.stringify(data)
                 });
 
-                console.log("Response status:", response.status);
-
                 if (response.ok) {
-                    const result = await response.text();
-                    console.log("Registration successful:", result);
                     alert("Registration successful!");
                 } else {
-                    const errorText = await response.text(); 
-                    console.log("Registration failed with error:", errorText);
                     alert("Registration failed!");
                 }
             } catch (error) {
                 console.error("Error during registration:", error);
-                alert("An error occurred during registration. Check console for details.");
+            }
+        }
+
+        async function sendDeleteRequest() {
+            const confirmation = confirm("Are you sure you want to cancel your account?");
+            if (!confirmation) return;
+
+            try {
+                const response = await fetch("http://127.0.0.1:9876/delete", {
+                    method: "DELETE",
+                    headers: {
+                        "Authorization": `Bearer ${document.getElementById("tokenBox").value}`
+                    }
+                });
+
+                if (response.ok) {
+                    alert("Account successfully deleted.");
+                    document.getElementById("tokenBox").value = ""; // Clear token after deletion
+                } else {
+                    alert("Failed to delete account.");
+                }
+            } catch (error) {
+                console.error("Error during account deletion:", error);
             }
         }
     </script>
