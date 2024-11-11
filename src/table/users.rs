@@ -10,7 +10,6 @@ enum Role {
 }
 
 impl Role {
-
     fn toRole(value: i16) -> Option<Role> {
         match value {
             0 => Some(Role::Admin),
