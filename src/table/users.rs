@@ -1,7 +1,18 @@
 use actix_web::{ delete, get, post, web::{ self, Bytes, Json }, Error, HttpRequest, HttpResponse };
 use chrono::{Duration, Utc};
 use jsonwebtoken::{ decode, encode, Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation };
-use sqlx::PgPool;
+use sqlx::{pool, PgPool};
+
+/*
+ *  PostgreSQL schema 
+ *      user(
+ *          id              bigint PRIMARY KEY SERIAL,
+ *          username        character varying(256),
+ *          password_hash   character varying(512),
+ *          role            smallint,
+ *          image           bytea
+ *      )
+ */
 
 #[derive(PartialEq)]
 enum Role {
@@ -23,32 +34,17 @@ impl Role {
     }
 }
 
-pub struct Users {
-    id: i64,
-    username: String,
-    password_hash: String,
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Claims {
+    id: String,
     role: i16,
-    image: Vec<u8>
+    exp: u64
 }
 
 #[derive(serde::Deserialize)]
 struct LoginReq {
     username: String,
     password_hash: String
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct RegisterReq {
-    username: String,
-    password_hash: String,
-    role: i16,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct Claims {
-    id: String,
-    role: i16,
-    exp: u64
 }
 
 #[post("/login")]
@@ -103,7 +99,14 @@ pub async fn Login(
             actix_web::error::ErrorInternalServerError("Failed to create Token.")
         })?;
 
-    Ok(HttpResponse::Ok().json(token))
+    Ok(HttpResponse::Ok().body(token))
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterReq {
+    username: String,
+    password_hash: String,
+    role: i16,
 }
 
 #[post("/register")]
@@ -133,8 +136,8 @@ pub async fn Register(
     Ok(HttpResponse::Ok().body("Register success."))
 }
 
-#[delete("/delete")]
-pub async fn Delete(
+#[delete("/cancel")]
+pub async fn Cancel(
     pool: web::Data<PgPool>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
@@ -149,6 +152,70 @@ pub async fn Delete(
         })?;
 
     Ok(HttpResponse::Ok().body("Account Cancellation success."))
+}
+
+#[derive(serde::Deserialize)]
+struct DeleterReq {
+    id: i64
+}
+
+#[delete("/delete")]
+pub async fn Delete(
+    pool: web::Data<PgPool>,
+    deleteInfo: Json<DeleterReq>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+    
+    if (!CheckIs(&UnwrapToken(&request)?, Role::Admin)?) {
+        return Err(actix_web::error::ErrorUnauthorized("Non-administrator accounts cannot DELETE other USERS."));
+    }
+
+    sqlx::query!("DELETE FROM \"user\" WHERE id = $1", deleteInfo.id)
+        .execute(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorForbidden("Insert failed.")
+        })?;
+    
+    Ok(HttpResponse::Ok().body("Delete account success."))
+}
+
+#[derive(serde::Serialize)]
+struct UsersResponse {
+    id: i64,
+    username: Option<String>,
+    role: Option<i16>
+}
+
+#[get("/users")]
+pub async fn Users(
+    pool: web::Data<PgPool>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+
+    if (!CheckIs(&UnwrapToken(&request)?, Role::Admin)?) {
+        return Err(actix_web::error::ErrorUnauthorized("Non-administrator accounts cannot request for LIST of USERS."));
+    }
+
+    let users = 
+        sqlx::query!("SELECT id, username, role FROM \"user\"")
+            .fetch_all(pool.get_ref())
+            .await
+            .map_err(|err| {
+                println!("Database error: {:?}", err);
+                actix_web::error::ErrorForbidden("Insert failed.")
+            })?;
+
+    let usersResponse: Vec<UsersResponse> = 
+        users.into_iter()
+            .map(|user| UsersResponse{
+                id: user.id,
+                username: user.username,
+                role: user.role
+            }).collect();
+
+    Ok(HttpResponse::Ok().json(usersResponse))
 }
 
 fn UnwrapToken(
