@@ -1,12 +1,10 @@
-#![allow(unused)]
+// #![allow(unused)]
 #![allow(non_snake_case)]
 
-use std::any::Any;
-
 use actix_cors::Cors;
-use actix_web::{ middleware::Logger, web::{ self, service }, App, HttpResponse, HttpServer };
+use actix_web::{ middleware::Logger, web::{ self }, App, HttpResponse, HttpServer };
 use sqlx::PgPool;
-use table::users;
+use table::{docs, users};
 pub mod table;
 
 async fn index() -> HttpResponse {
@@ -32,6 +30,11 @@ async fn main() -> std::io::Result<()> {
             .service(users::Cancel)
             .service(users::Delete)
             .service(users::Users)
+            .service(docs::add_document)
+            .service(docs::list_documents)
+            .service(docs::download_document)
+            .service(docs::delete_document)
+            .service(docs::edit_document)
     })
     .bind("localhost:9876")?
     .run()

@@ -1,7 +1,7 @@
-use actix_web::{ delete, get, post, web::{ self, Bytes, Json }, Error, HttpRequest, HttpResponse };
-use chrono::{Duration, Utc};
-use jsonwebtoken::{ decode, encode, Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation };
-use sqlx::{pool, PgPool};
+use actix_web::{ delete, get, post, web::{ self, Json }, Error, HttpRequest, HttpResponse };
+use chrono::{ Duration, Utc };
+use jsonwebtoken::{ decode, encode, DecodingKey, EncodingKey, Header, Validation };
+use sqlx::PgPool;
 
 /*
  *  PostgreSQL schema 
@@ -15,7 +15,7 @@ use sqlx::{pool, PgPool};
  */
 
 #[derive(PartialEq)]
-enum Role {
+pub enum Role {
     Admin,
     User
 }
@@ -35,10 +35,10 @@ impl Role {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct Claims {
-    id: String,
-    role: i16,
-    exp: u64
+pub struct Claims {
+    pub id: String,
+    pub role: i16,
+    pub exp: u64
 }
 
 #[derive(serde::Deserialize)]
@@ -117,8 +117,8 @@ pub async fn Register(
 ) -> Result<HttpResponse, Error> {
 
     // Non-administrator accounts cannot create administrator accounts
-    if (Role::Admin.equal(regInfo.role)) {
-        if (!CheckIs(&UnwrapToken(&request)?, Role::Admin)?) { 
+    if Role::Admin.equal(regInfo.role) {
+        if !CheckIs(&UnwrapToken(&request)?, Role::Admin)? { 
             return Err(actix_web::error::ErrorUnauthorized("Non-administrator accounts cannot create administrator accounts."));
         }
     }
@@ -166,7 +166,7 @@ pub async fn Delete(
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
     
-    if (!CheckIs(&UnwrapToken(&request)?, Role::Admin)?) {
+    if !CheckIs(&UnwrapToken(&request)?, Role::Admin)? {
         return Err(actix_web::error::ErrorUnauthorized("Non-administrator accounts cannot DELETE other USERS."));
     }
 
@@ -194,7 +194,7 @@ pub async fn Users(
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
 
-    if (!CheckIs(&UnwrapToken(&request)?, Role::Admin)?) {
+    if !CheckIs(&UnwrapToken(&request)?, Role::Admin)? {
         return Err(actix_web::error::ErrorUnauthorized("Non-administrator accounts cannot request for LIST of USERS."));
     }
 
@@ -218,7 +218,7 @@ pub async fn Users(
     Ok(HttpResponse::Ok().json(usersResponse))
 }
 
-fn UnwrapToken(
+pub fn UnwrapToken(
     request: &HttpRequest
 ) -> Result<Claims, Error> {
 
@@ -226,7 +226,7 @@ fn UnwrapToken(
         std::env::var("ENCODING_KEY")
             .expect("Encoding Key undefined.");
 
-    let mut validation = Validation::default();
+    let validation = Validation::default();
 
     // Decode and unwrap for claims in token
     if let Some(authorHeader) = request.headers().get("Authorization") {
@@ -247,7 +247,7 @@ fn UnwrapToken(
     Err(actix_web::error::ErrorUnauthorized("Failed to fetch and parse token."))
 }
 
-fn CheckIs(
+pub fn CheckIs(
     claims: &Claims,
     roleCheck: Role
 ) -> Result<bool, Error> {
