@@ -1,12 +1,13 @@
-use actix_web::{ delete, get, post, put, web, HttpRequest, HttpResponse, Error };
-use sqlx::PgPool;
-use actix_web::web::Json;
+use actix_web::{delete, get, post, put, web::{self, Json}, HttpRequest, HttpResponse, Error};
 use time::{ OffsetDateTime, UtcOffset };
-use super::users::{ CheckIs, UnwrapToken, Role };
+use sqlx::PgPool;
+use super::user::{CheckIs, CheckAdmin, CheckUser, UnwrapToken, Role};
+use super::logs::RecordLog;
 
 /*
  *  PostgreSQL schema 
- *      document(
+ * 
+ *      docs(
  *          id              bigint PRIMARY KEY,
  *          title           character varying(256),
  *          pdf_content     bytea,
@@ -19,7 +20,7 @@ use super::users::{ CheckIs, UnwrapToken, Role };
 #[derive(serde::Deserialize)]
 struct DocumentRequest {
     title: String,
-    pdf_content: Vec<u8>,
+    pdf_content: Vec<u8>
 }
 
 #[derive(serde::Serialize)]
@@ -27,29 +28,24 @@ struct DocumentResponse {
     id: i64,
     title: String,
     upload_date: OffsetDateTime,
-    download_count: i32,
-}
-
-fn check_admin(request: &HttpRequest) -> Result<(), Error> {
-    if !CheckIs(&UnwrapToken(request)?, Role::Admin)? {
-        return Err(actix_web::error::ErrorUnauthorized("Only admins can perform this action."));
-    }
-    Ok(())
+    download_count: i32
 }
 
 #[post("/documents")]
-async fn add_document(
+async fn Add(
     pool: web::Data<PgPool>,
-    document_req: Json<DocumentRequest>,
-    request: HttpRequest,
+    docsReq: Json<DocumentRequest>,
+    request: HttpRequest
 ) -> Result<HttpResponse, Error> {
-    check_admin(&request)?;
+
+    let claims = CheckAdmin(&request)?;
 
     sqlx::query!(
-        "INSERT INTO document (title, pdf_content, uploaded_by, download_count, upload_date) VALUES ($1, $2, $3, 0, NOW())",
-        &document_req.title,
-        &document_req.pdf_content,
-        UnwrapToken(&request)?.id.parse::<i64>().map_err(|_| actix_web::error::ErrorBadRequest("Invalid user ID"))?,
+        "INSERT INTO docs (title, pdf_content, uploaded_by, download_count, upload_date) 
+            VALUES ($1, $2, $3, 0, NOW())",
+        &docsReq.title,
+        &docsReq.pdf_content,
+        UnwrapToken(&request)?.id
     )
     .execute(pool.get_ref())
     .await
@@ -58,12 +54,32 @@ async fn add_document(
         actix_web::error::ErrorInternalServerError("Failed to add document.")
     })?;
 
+    let document = 
+        sqlx::query!("SELECT id FROM docs WHERE title = $1 and pdf_content = $2", 
+            &docsReq.title, &docsReq.pdf_content)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to fetch document id.")
+        })?;
+
+    RecordLog(claims.id, &pool, format!("(Administrator) Add document of ID {}", document.id));
     Ok(HttpResponse::Ok().body("Document added successfully."))
 }
 
 #[get("/documents")]
-async fn list_documents(pool: web::Data<PgPool>) -> Result<HttpResponse, Error> {
-    let documents = sqlx::query!("SELECT id, title, upload_date, download_count FROM document")
+async fn List(
+    pool: web::Data<PgPool>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+    
+    let userID: i64 = match UnwrapToken(&request) {
+        Ok(claims) => claims.id,
+        Err(err) => 0
+    };
+
+    let documents = sqlx::query!("SELECT id, title, upload_date, download_count FROM docs")
         .fetch_all(pool.get_ref())
         .await
         .map_err(|err| {
@@ -71,7 +87,7 @@ async fn list_documents(pool: web::Data<PgPool>) -> Result<HttpResponse, Error> 
             actix_web::error::ErrorInternalServerError("Failed to retrieve documents.")
         })?;
 
-    let documents_response: Vec<DocumentResponse> = documents
+    let docsResponse: Vec<DocumentResponse> = documents
         .into_iter()
         .map(|doc| DocumentResponse {
             id: doc.id,
@@ -80,20 +96,25 @@ async fn list_documents(pool: web::Data<PgPool>) -> Result<HttpResponse, Error> 
             download_count: doc.download_count.unwrap_or(0),
         }).collect();
 
-    Ok(HttpResponse::Ok().json(documents_response))
+    RecordLog(userID, &pool, format!("{} Request for document list", if userID == 0 {"(Guest)"} else {""}));
+    Ok(HttpResponse::Ok().json(docsResponse))
 }
 
 #[get("/documents/download/{id}")]
-async fn download_document(
+async fn Download(
     pool: web::Data<PgPool>,
-    document_id: web::Path<i64>,
+    docsID: web::Path<i64>,
+    request: HttpRequest
 ) -> Result<HttpResponse, Error> {
+
+    let claims = CheckUser(&request)?;
+
     let mut transaction = pool.begin().await.map_err(|err| {
         println!("Database error: {:?}", err);
         actix_web::error::ErrorInternalServerError("Failed to start transaction.")
     })?;
 
-    let document = sqlx::query!("SELECT pdf_content FROM document WHERE id = $1", *document_id)
+    let document = sqlx::query!("SELECT pdf_content FROM docs WHERE id = $1", *docsID)
         .fetch_one(&mut transaction)
         .await
         .map_err(|err| {
@@ -101,7 +122,7 @@ async fn download_document(
             actix_web::error::ErrorNotFound("Document not found.")
         })?;
 
-    sqlx::query!("UPDATE document SET download_count = download_count + 1 WHERE id = $1", *document_id)
+    sqlx::query!("UPDATE docs SET download_count = download_count + 1 WHERE id = $1", *docsID)
         .execute(&mut transaction)
         .await
         .map_err(|err| {
@@ -114,6 +135,7 @@ async fn download_document(
         actix_web::error::ErrorInternalServerError("Failed to commit transaction.")
     })?;
 
+    RecordLog(claims.id, &pool, format!("Download document of ID {}", docsID));
     if let Some(pdf_bytes) = document.pdf_content {
         Ok(HttpResponse::Ok()
             .content_type("application/pdf")
@@ -124,19 +146,20 @@ async fn download_document(
 }
 
 #[put("/documents/{id}")]
-async fn edit_document(
+async fn Edit(
     pool: web::Data<PgPool>,
-    document_id: web::Path<i64>,
-    document_req: Json<DocumentRequest>,
-    request: HttpRequest,
+    docsID: web::Path<i64>,
+    docsReq: Json<DocumentRequest>,
+    request: HttpRequest
 ) -> Result<HttpResponse, Error> {
-    check_admin(&request)?;
+
+    let claims = CheckAdmin(&request)?;
 
     sqlx::query!(
-        "UPDATE document SET title = $1, pdf_content = $2 WHERE id = $3",
-        &document_req.title,
-        &document_req.pdf_content,
-        *document_id
+        "UPDATE docs SET title = $1, pdf_content = $2 WHERE id = $3",
+        &docsReq.title,
+        &docsReq.pdf_content,
+        *docsID
     )
     .execute(pool.get_ref())
     .await
@@ -145,18 +168,20 @@ async fn edit_document(
         actix_web::error::ErrorInternalServerError("Failed to edit document.")
     })?;
 
+    RecordLog(claims.id, &pool, format!("(Administrator) Edit document of ID {}", docsID));
     Ok(HttpResponse::Ok().body("Document updated successfully."))
 }
 
 #[delete("/documents/{id}")]
-async fn delete_document(
+async fn Delete(
     pool: web::Data<PgPool>,
-    document_id: web::Path<i64>,
-    request: HttpRequest,
+    docsID: web::Path<i64>,
+    request: HttpRequest
 ) -> Result<HttpResponse, Error> {
-    check_admin(&request)?;
 
-    sqlx::query!("DELETE FROM document WHERE id = $1", *document_id)
+    let claims = CheckAdmin(&request)?;
+
+    sqlx::query!("DELETE FROM docs WHERE id = $1", *docsID)
         .execute(pool.get_ref())
         .await
         .map_err(|err| {
@@ -164,5 +189,6 @@ async fn delete_document(
             actix_web::error::ErrorInternalServerError("Failed to delete document.")
         })?;
 
+    RecordLog(claims.id, &pool, format!("(Administrator) Delete document of ID {}", docsID));
     Ok(HttpResponse::Ok().body("Document deleted successfully."))
 }

@@ -1,14 +1,13 @@
-// #![allow(unused)]
+#![allow(unused)]
 #![allow(non_snake_case)]
 
 use actix_cors::Cors;
-use actix_web::{ middleware::Logger, web::{ self }, App, HttpResponse, HttpServer };
+use actix_web::{middleware::Logger, web::{self}, App, HttpResponse, HttpServer};
 use sqlx::PgPool;
-use table::{docs, users};
+use table::{book::{self, UserRecords}, docs, logs, stat, user};
 pub mod table;
 
 async fn index() -> HttpResponse {
-    println!("Require for index");
     HttpResponse::Ok().body("Hello, world")
 }
 
@@ -25,16 +24,26 @@ async fn main() -> std::io::Result<()> {
             // .wrap(Cors::default().allowed_origin("http://localhost:52330"))
             .app_data(web::Data::new(pool.clone()))
             .route("/", web::get().to(index))
-            .service(users::Login)
-            .service(users::Register)
-            .service(users::Cancel)
-            .service(users::Delete)
-            .service(users::Users)
-            .service(docs::add_document)
-            .service(docs::list_documents)
-            .service(docs::download_document)
-            .service(docs::delete_document)
-            .service(docs::edit_document)
+            .service(user::Login)
+            .service(user::Register)
+            .service(user::Cancel)
+            .service(user::Delete)
+            .service(user::Users)
+            .service(docs::Add)
+            .service(docs::List)
+            .service(docs::Download)
+            .service(docs::Delete)
+            .service(docs::Edit)
+            .service(book::Add)
+            .service(book::List)
+            .service(book::Delete)
+            .service(book::Edit)
+            .service(book::Borrow)
+            .service(book::Return)
+            .service(book::Records)
+            .service(book::UserRecords)
+            .service(stat::Info)
+            .service(logs::Logs)
     })
     .bind("localhost:9876")?
     .run()

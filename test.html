@@ -65,6 +65,26 @@
     <button type="button" onclick="listDocuments()">List Documents</button>
     <div id="documentsList"></div>
 
+    <!-- Book Management -->
+    <h2>Book Management</h2>
+
+    <!-- Add Book Form -->
+    <h3>Add New Book</h3>
+    <form id="addBookForm">
+        <label for="bookTitle">Title:</label>
+        <input type="text" id="bookTitle" required>
+        <br><br>
+        <label for="bookAuthor">Author:</label>
+        <input type="text" id="bookAuthor" required>
+        <br><br>
+        <button type="button" onclick="addBook()">Add Book</button>
+    </form>
+
+    <!-- List Books Button -->
+    <h3>Books List</h3>
+    <button type="button" onclick="listBooks()">List Books</button>
+    <div id="booksList"></div>
+
     <script>
         // User Management Logic (existing functionality)
         async function sendLoginRequest() {
@@ -73,7 +93,8 @@
 
             const data = {
                 username: username,
-                password_hash: password 
+                password_hash: password,
+                role: 0 
             };
 
             try {
@@ -392,6 +413,130 @@
                 console.error("Error deleting document:", error);
             }
         }
+
+        // Book Management Logic
+        async function addBook() {
+            const title = document.getElementById("bookTitle").value;
+            const author = document.getElementById("bookAuthor").value;
+
+            const data = {
+                title: title,
+                author: author
+            };
+
+            try {
+                const response = await fetch("http://127.0.0.1:9876/books", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${document.getElementById("tokenBox").value}`
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    alert("Book added successfully!");
+                } else {
+                    alert("Failed to add book.");
+                }
+            } catch (error) {
+                console.error("Error during book addition:", error);
+            }
+        }
+
+        async function listBooks() {
+            try {
+                const response = await fetch("http://127.0.0.1:9876/books", {
+                    method: "GET"
+                });
+
+                if (response.ok) {
+                    const books = await response.json();
+                    displayBooks(books);
+                } else {
+                    alert("Failed to retrieve books.");
+                }
+            } catch (error) {
+                console.error("Error during books retrieval:", error);
+            }
+        }
+
+        function displayBooks(books) {
+            const booksList = document.getElementById("booksList");
+            booksList.innerHTML = "<h3>Books:</h3>";
+
+            books.forEach(book => {
+                const bookElement = document.createElement("p");
+
+                const editButton = document.createElement("button");
+                editButton.textContent = "Edit";
+                editButton.onclick = () => editBook(book.id);
+
+                const deleteButton = document.createElement("button");
+                deleteButton.textContent = "Delete";
+                deleteButton.onclick = () => confirmAndDeleteBook(book.id);
+
+                bookElement.textContent = `ID: ${book.id}, Title: ${book.title}, Author: ${book.author}, Available: ${book.available ? "Yes" : "No"}`;
+                bookElement.appendChild(editButton);
+                bookElement.appendChild(deleteButton);
+                booksList.appendChild(bookElement);
+            });
+        }
+
+        async function editBook(id) {
+            const title = prompt("Enter new title:");
+            const author = prompt("Enter new author:");
+            if (!title || !author) return;
+
+            const data = {
+                title: title,
+                author: author
+            };
+
+            try {
+                const response = await fetch(`http://127.0.0.1:9876/books/${id}`, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${document.getElementById("tokenBox").value}`
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    alert("Book updated successfully.");
+                    listBooks(); // Refresh the books list
+                } else {
+                    alert("Failed to update book.");
+                }
+            } catch (error) {
+                console.error("Error updating book:", error);
+            }
+        }
+
+        async function confirmAndDeleteBook(id) {
+            const confirmation = confirm("Are you sure you want to delete this book?");
+            if (!confirmation) return;
+
+            try {
+                const response = await fetch(`http://127.0.0.1:9876/books/${id}`, {
+                    method: "DELETE",
+                    headers: {
+                        "Authorization": `Bearer ${document.getElementById("tokenBox").value}`
+                    }
+                });
+
+                if (response.ok) {
+                    alert("Book deleted successfully.");
+                    listBooks(); // Refresh the books list
+                } else {
+                    alert("Failed to delete book.");
+                }
+            } catch (error) {
+                console.error("Error deleting book:", error);
+            }
+        }
     </script>
+
 </body>
 </html>
