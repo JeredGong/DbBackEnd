@@ -1,15 +1,19 @@
 ## 目录文件功能:
 
 - .env
+  
   一些为了安全性而选择不加入代码的敏感数据, 包含 `DATABASE_URL` 和 `ENCODING_KEY`.
 
 - Initialize.sql
+  
   PostgreSQL 数据库初始化代码.
 
 - test.html
+  
   部分用于测试的前端代码.
 
 - /src
+  
   rust 源文件目录.
 
 -----------------------
