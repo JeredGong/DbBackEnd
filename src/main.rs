@@ -1,10 +1,9 @@
-#![allow(unused)]
 #![allow(non_snake_case)]
 
 use actix_cors::Cors;
 use actix_web::{middleware::Logger, web::{self}, App, HttpResponse, HttpServer};
 use sqlx::PgPool;
-use table::{book::{self, UserRecords}, docs, logs, stat, user};
+use table::{book::{self}, docs, logs, stat, user};
 pub mod table;
 
 async fn index() -> HttpResponse {
@@ -26,16 +25,21 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .service(user::Login)
             .service(user::Register)
+            .service(user::GetImage)
+            .service(user::ModifyImage)
+            .service(user::ModifyPasswd)
             .service(user::Cancel)
             .service(user::Delete)
             .service(user::Users)
             .service(docs::Add)
             .service(docs::List)
+            .service(docs::Search)
             .service(docs::Download)
             .service(docs::Delete)
             .service(docs::Edit)
             .service(book::Add)
             .service(book::List)
+            .service(book::Search)
             .service(book::Delete)
             .service(book::Edit)
             .service(book::Borrow)

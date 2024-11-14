@@ -1,7 +1,6 @@
-use actix_web::{delete, get, post, put, web::{self, Json}, HttpRequest, HttpResponse, Error};
-use time::{ OffsetDateTime, UtcOffset };
+use actix_web::{get, web::{self}, HttpRequest, HttpResponse, Error};
 use sqlx::PgPool;
-use super::user::{CheckIs, CheckAdmin, CheckUser, UnwrapToken, Role};
+use super::user::CheckAdmin;
 
 /*
  *  PostgreSQL schema 
@@ -62,6 +61,6 @@ async fn Logs(
                 action: log.action.expect("Action not found.")
             }).collect();
     
-    RecordLog(claims.id, &pool, format!("(Administrator) Request for logs"));
+    RecordLog(claims.id, &pool, format!("(Administrator) Request for logs")).await?;
     Ok(HttpResponse::Ok().json(logResponse))
 }

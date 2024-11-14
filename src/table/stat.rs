@@ -1,7 +1,6 @@
-use actix_web::{delete, get, post, put, web::{self, Json}, HttpRequest, HttpResponse, Error};
-use time::{ OffsetDateTime, UtcOffset };
+use actix_web::{get, web::{self}, HttpRequest, HttpResponse, Error};
 use sqlx::PgPool;
-use super::user::{CheckIs, CheckAdmin, CheckUser, UnwrapToken, Role};
+use super::user::CheckAdmin;
 use super::logs::RecordLog;
 
 #[derive(serde::Serialize)]
@@ -18,9 +17,14 @@ pub async fn Info(
 
     let claims = CheckAdmin(&request)?;
 
+    let mut transaction = pool.begin().await.map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to start transaction.")
+    })?;
+    
     let countBook = 
         sqlx::query!("SELECT COUNT(id) FROM recs")
-            .fetch_one(pool.get_ref())
+            .fetch_one(&mut transaction)
             .await
             .map_err(|err| {
                 println!("Database error: {:?}", err);
@@ -29,7 +33,7 @@ pub async fn Info(
 
     let countDocs = 
         sqlx::query!("SELECT SUM(download_count) FROM docs")
-            .fetch_one(pool.get_ref())
+            .fetch_one(&mut transaction)
             .await
             .map_err(|err| {
                 println!("Database error: {:?}", err);
@@ -41,6 +45,11 @@ pub async fn Info(
         countDocs: countDocs.sum.expect("Failed to fetch count of documents downloaded.")
     };
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Request for Statistics"));
+    transaction.commit().await.map_err(|err| {
+        println!("Transaction error: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to commit transaction.")
+    })?;
+
+    RecordLog(claims.id, &pool, format!("(Administrator) Request for Statistics")).await?;
     Ok(HttpResponse::Ok().json(statisticsResponse))
 }

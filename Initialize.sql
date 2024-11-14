@@ -64,7 +64,10 @@ CREATE TABLE IF NOT EXISTS public.docs
     pdf_content bytea,
     uploaded_by bigint,
     download_count integer,
-    upload_date timestamp with time zone,
+    upload_time timestamp with time zone,
+	doc_type character varying(128),
+	author character varying(128),
+	publish_date date,
     CONSTRAINT docs_pkey PRIMARY KEY (id),
     CONSTRAINT uploaded_by_exist FOREIGN KEY (uploaded_by)
         REFERENCES public."user" (id) MATCH SIMPLE
@@ -97,7 +100,9 @@ CREATE TABLE IF NOT EXISTS public.book
 (
     id bigint NOT NULL DEFAULT nextval('book_id_seq'::regclass),
     title character varying(256) COLLATE pg_catalog."default",
-    author character varying(256) COLLATE pg_catalog."default",
+    author character varying(128) COLLATE pg_catalog."default",
+	book_type character varying(128) COLLATE pg_catalog."default",
+	publish_date date,
     available boolean,
     CONSTRAINT book_pkey PRIMARY KEY (id)
 )
