@@ -23,7 +23,7 @@ pub enum Role {
 }
 
 impl Role {
-    fn toRole(value: i16) -> Option<Role> {
+    pub fn toRole(value: i16) -> Option<Role> {
         match value {
             0 => Some(Role::Admin),
             1 => Some(Role::User),
@@ -105,10 +105,17 @@ pub fn CheckUser(request: &HttpRequest) -> Result<Claims, Error> {
 }
 
 #[derive(serde::Deserialize)]
-struct UsersRequest {
+struct LoginRequest {
+    username: String,
+    password_hash: String
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterRequest {
     username: String,
     password_hash: String,
-    role: i16
+    role: i16,
+    image: Vec<u8>
 }
 
 #[derive(serde::Serialize)]
@@ -137,7 +144,7 @@ struct PasswdRequest {
 #[post("/login")]
 pub async fn Login(
     pool: web::Data<PgPool>,
-    usersReq: Json<UsersRequest>
+    usersReq: Json<LoginRequest>
 ) -> Result<HttpResponse, Error> {
 
     // Get user infomation from database
@@ -193,7 +200,7 @@ pub async fn Login(
 #[post("/register")]
 pub async fn Register(
     pool: web::Data<PgPool>,
-    usersReq: Json<UsersRequest>,
+    usersReq: Json<RegisterRequest>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
 
@@ -206,8 +213,8 @@ pub async fn Register(
     })?;
 
     // Insert a new user
-    sqlx::query!("INSERT INTO \"user\" (username, password_hash, role) VALUES ($1, $2, $3)", 
-        &usersReq.username, &usersReq.password_hash, &usersReq.role) 
+    sqlx::query!("INSERT INTO \"user\" (username, password_hash, role, image) VALUES ($1, $2, $3, $4)", 
+        &usersReq.username, &usersReq.password_hash, &usersReq.role, &usersReq.image) 
         .execute(&mut transaction)
         .await
         .map_err(|err| {
