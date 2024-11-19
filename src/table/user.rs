@@ -117,7 +117,7 @@ struct UsersRequest {
     password_hash: String,
     email: String,
     role: i16,
-    image: Vec<u8>
+    image: String
 }
 
 #[derive(serde::Serialize)]
@@ -126,17 +126,17 @@ struct UsersResponse {
     username: String,
     email: String,
     role: i16,
-    image: Vec<u8>
+    image: String
 }
 
 #[derive(serde::Deserialize)]
 struct ImageRequest {
-    image: Vec<u8>
+    image: String
 }
 
 #[derive(serde::Serialize)]
 struct ImageResponse {
-    image: Vec<u8>
+    image: String
 }
 
 #[derive(serde::Deserialize)]
@@ -156,7 +156,7 @@ pub async fn Login(
 ) -> Result<HttpResponse, Error> {
 
     // Get user infomation from database
-    let user = sqlx::query!("SELECT id, username, password_hash, role, image FROM \"user\" WHERE username = $1", &usersReq.username)
+    let user = sqlx::query!("SELECT id, username, password_hash, role FROM \"user\" WHERE username = $1", &usersReq.username)
         .fetch_one(pool.get_ref())
         .await
         .map_err(|err| {
@@ -220,7 +220,7 @@ pub async fn Register(
     })?;
 
     // Insert a new user
-    sqlx::query!("INSERT INTO \"user\" (username, password_hash, email, role, image) VALUES ($1, $2, $3, $4, $5)", 
+    sqlx::query!("INSERT INTO \"user\" (username, password_hash, email, role, image) VALUES ($1, $2, $3, $4, decode($5, 'base64'))", 
         &usersReq.username, &usersReq.password_hash, &usersReq.email, &usersReq.role, &usersReq.image) 
         .execute(&mut transaction)
         .await
@@ -255,7 +255,7 @@ pub async fn GetInfo(
 
     let claims = CheckUser(&request)?;
     
-    let user = sqlx::query!("SELECT id, username, email, role, image FROM \"user\" WHERE id = $1", &claims.id)
+    let user = sqlx::query!("SELECT id, username, email, role, encode(image, 'base64') AS image FROM \"user\" WHERE id = $1", &claims.id)
         .fetch_one(pool.get_ref())
         .await
         .map_err(|err| {
@@ -284,7 +284,7 @@ pub async fn GetImage(
     let claims = CheckUser(&request)?;
     
     let image = 
-        sqlx::query!("SELECT image FROM \"user\" WHERE id = $1", claims.id)
+        sqlx::query!("SELECT encode(image, 'base64') AS image FROM \"user\" WHERE id = $1", claims.id)
             .fetch_one(pool.get_ref())
             .await
             .map_err(|err| {
@@ -310,7 +310,7 @@ pub async fn ModifyImage(
     let claims = CheckUser(&request)?;
     
     sqlx::query!(
-        "UPDATE \"user\" SET image = $1 WHERE id = $2",
+        "UPDATE \"user\" SET image = decode($1, 'base64') WHERE id = $2",
         &imageReq.image,
         &claims.id
     )
@@ -425,7 +425,7 @@ pub async fn Users(
     let claims = CheckAdmin(&request)?;
 
     let users = 
-        sqlx::query!("SELECT id, username, email, role, image FROM \"user\"")
+        sqlx::query!("SELECT id, username, email, role, encode(image, 'base64') AS image FROM \"user\"")
             .fetch_all(pool.get_ref())
             .await
             .map_err(|err| {

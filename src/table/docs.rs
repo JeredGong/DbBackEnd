@@ -37,7 +37,7 @@ struct DocumentRequest {
     title: String,
     author: String,
     docType: String,
-    pdfContent: Vec<u8>,
+    pdfContent: String,
     publishDate: Date
 }
 
@@ -65,7 +65,7 @@ async fn Add(
         
         sqlx::query!(
             "INSERT INTO docs (title, author, doc_type, pdf_content, publish_date, uploaded_by, download_count, upload_time) 
-                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
+                VALUES ($1, $2, $3, decode($4, 'base64'), $5, $6, 0, NOW())",
             &docsReq.title,
             &docsReq.author,
             &docsReq.docType,
@@ -81,7 +81,7 @@ async fn Add(
         })?;
     
         let document = 
-            sqlx::query!("SELECT id FROM docs WHERE title = $1 and pdf_content = $2", 
+            sqlx::query!("SELECT id FROM docs WHERE title = $1 and pdf_content = decode($2, 'base64')", 
                 &docsReq.title, &docsReq.pdfContent)
             .fetch_one(pool.get_ref())
             .await
@@ -97,7 +97,7 @@ async fn Add(
 
         sqlx::query!(
             "INSERT INTO buff (title, author, doc_type, pdf_content, publish_date, uploaded_by, download_count, upload_time) 
-                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
+                VALUES ($1, $2, $3, decode($4, 'base64'), $5, $6, 0, NOW())",
             &docsReq.title,
             &docsReq.author,
             &docsReq.docType,
@@ -194,7 +194,7 @@ async fn DownloadBuffer(
 
     let claims = CheckAdmin(&request)?;
 
-    let document = sqlx::query!("SELECT pdf_content FROM buff WHERE id = $1", *buffID)
+    let document = sqlx::query!("SELECT encode(pdf_content, 'base64') AS pdf_content FROM buff WHERE id = $1", *buffID)
         .fetch_one(pool.get_ref())
         .await
         .map_err(|err| {
@@ -203,13 +203,7 @@ async fn DownloadBuffer(
         })?;
 
     RecordLog(claims.id, &pool, format!("(Admininstrator) Download document in buffer of ID {}", *buffID)).await?;
-    if let Some(pdf_bytes) = document.pdf_content {
-        Ok(HttpResponse::Ok()
-            .content_type("application/pdf")
-            .body(pdf_bytes))
-    } else {
-        Err(actix_web::error::ErrorInternalServerError("Document content is empty."))
-    }
+    Ok(HttpResponse::Ok().body(document.pdf_content.unwrap_or_default()))
 }
 
 #[post("/documents/buffer/{id}")]
@@ -320,7 +314,7 @@ async fn Download(
         actix_web::error::ErrorInternalServerError("Failed to start transaction.")
     })?;
 
-    let document = sqlx::query!("SELECT pdf_content FROM docs WHERE id = $1", *docsID)
+    let document = sqlx::query!("SELECT encode(pdf_content, 'base64') AS pdf_content FROM docs WHERE id = $1", *docsID)
         .fetch_one(&mut transaction)
         .await
         .map_err(|err| {
@@ -342,13 +336,7 @@ async fn Download(
     })?;
 
     RecordLog(claims.id, &pool, format!("Download document of ID {}", docsID)).await?;
-    if let Some(pdf_bytes) = document.pdf_content {
-        Ok(HttpResponse::Ok()
-            .content_type("application/pdf")
-            .body(pdf_bytes))
-    } else {
-        Err(actix_web::error::ErrorInternalServerError("Document content is empty."))
-    }
+    Ok(HttpResponse::Ok().body(document.pdf_content.unwrap_or_default()))
 }
 
 #[put("/documents/{id}")]
@@ -362,7 +350,7 @@ async fn Edit(
     let claims = CheckAdmin(&request)?;
 
     sqlx::query!(
-        "UPDATE docs SET title = $1, author = $2, doc_type = $3, pdf_content = $4, publish_date = $5 WHERE id = $6",
+        "UPDATE docs SET title = $1, author = $2, doc_type = $3, pdf_content = decode($4, 'base64'), publish_date = $5 WHERE id = $6",
         &docsReq.title,
         &docsReq.author,
         &docsReq.docType,
