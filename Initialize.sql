@@ -1,3 +1,10 @@
+CREATE DATABASE test
+WITH 
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    CONNECTION LIMIT = -1;
+
+-- Creating Tables
 DROP TABLE IF EXISTS public.docs;
 DROP TABLE IF EXISTS public.recs;
 DROP TABLE IF EXISTS public.logs;
