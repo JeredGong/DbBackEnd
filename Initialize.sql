@@ -1,10 +1,12 @@
 DROP TABLE IF EXISTS public.docs;
+DROP TABLE IF EXISTS public.buff;
 DROP TABLE IF EXISTS public.recs;
 DROP TABLE IF EXISTS public.logs;
 DROP TABLE IF EXISTS public.user;
 DROP TABLE IF EXISTS public.book;
 DROP SEQUENCE IF EXISTS public.user_id_seq;
 DROP SEQUENCE IF EXISTS public.docs_id_seq;
+DROP SEQUENCE IF EXISTS public.buff_id_seq;
 DROP SEQUENCE IF EXISTS public.book_id_seq;
 DROP SEQUENCE IF EXISTS public.recs_id_seq;
 DROP SEQUENCE IF EXISTS public.logs_id_seq;
@@ -28,10 +30,12 @@ CREATE TABLE IF NOT EXISTS public.user
     id bigint NOT NULL DEFAULT nextval('user_id_seq'::regclass),
     username character varying(256) COLLATE pg_catalog."default",
     password_hash character varying(512) COLLATE pg_catalog."default",
+	email character varying(256) COLLATE pg_catalog."default",
     role smallint,
     image bytea,
     CONSTRAINT user_pkey PRIMARY KEY (id),
-    CONSTRAINT name_unique UNIQUE (username)
+    CONSTRAINT name_unique UNIQUE (username),
+	CONSTRAINT email_unique UNIQUE (email)
 )
 
 TABLESPACE pg_default;
@@ -82,6 +86,45 @@ ALTER TABLE IF EXISTS public.docs
     OWNER to postgres;
 
 
+-- buff: Buffer of uploaded documents
+
+	-- buff_id_seq
+	
+	CREATE SEQUENCE IF NOT EXISTS public.buff_id_seq
+	    INCREMENT 1
+	    START 1
+	    MINVALUE 1
+	    MAXVALUE 9223372036854775807
+	    CACHE 1;
+	
+	ALTER SEQUENCE public.buff_id_seq
+	    OWNER TO postgres;
+
+CREATE TABLE IF NOT EXISTS public.buff
+(
+    id bigint NOT NULL DEFAULT nextval('buff_id_seq'::regclass),
+    title character varying(256) COLLATE pg_catalog."default",
+    pdf_content bytea,
+    uploaded_by bigint,
+    download_count integer,
+    upload_time timestamp with time zone,
+	doc_type character varying(128),
+	author character varying(128),
+	publish_date date,
+    CONSTRAINT buff_pkey PRIMARY KEY (id),
+    CONSTRAINT uploaded_by_exist FOREIGN KEY (uploaded_by)
+        REFERENCES public."user" (id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+        NOT VALID
+)
+
+TABLESPACE pg_default;
+
+ALTER TABLE IF EXISTS public.buff
+    OWNER to postgres;
+
+	
 -- book: Information of books
 
 	-- book_id_seq;

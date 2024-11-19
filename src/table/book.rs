@@ -1,7 +1,7 @@
 use actix_web::{delete, get, post, put, web::{self, Json}, Error, HttpRequest, HttpResponse};
 use time::{OffsetDateTime, UtcOffset, Date};
 use sqlx::PgPool;
-use super::user::{CheckAdmin, CheckUser, UnwrapToken};
+use super::user::{CheckAdmin, CheckUser};
 use super::logs::RecordLog;
 
 /*
@@ -123,10 +123,7 @@ async fn List(
     request: HttpRequest
 ) -> Result<HttpResponse, Error>  {
 
-    let userID: i64 = match UnwrapToken(&request) {
-        Ok(claims) => claims.id,
-        Err(_) => 0
-    };
+    let claims = CheckAdmin(&request)?;
 
     let books = sqlx::query!("SELECT id, title, author, book_type, publish_date, available FROM book")
         .fetch_all(pool.get_ref())
@@ -147,7 +144,7 @@ async fn List(
             available: book.available.expect("Book available is missing.")
         }).collect();
 
-    RecordLog(userID, &pool, format!("{} Request for book list", if userID == 0 {"(Guest)"} else {""})).await?;
+    RecordLog(claims.id, &pool, format!("(Admininstrator) Request for book list")).await?;
     Ok(HttpResponse::Ok().json(bookResponse))
 }
 
@@ -206,9 +203,11 @@ async fn Edit(
     let claims = CheckAdmin(&request)?;
 
     sqlx::query!(
-        "UPDATE book SET title = $1, author = $2 WHERE id = $3",
+        "UPDATE book SET title = $1, author = $2, book_type = $3, publish_date = $4 WHERE id = $5",
         &bookReq.title,
         &bookReq.author,
+        &bookReq.bookType,
+        &bookReq.publishDate,
         *bookID
     )
     .execute(pool.get_ref())
