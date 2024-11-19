@@ -30,10 +30,12 @@ CREATE TABLE IF NOT EXISTS public.user
     id bigint NOT NULL DEFAULT nextval('user_id_seq'::regclass),
     username character varying(256) COLLATE pg_catalog."default",
     password_hash character varying(512) COLLATE pg_catalog."default",
+	email character varying(256) COLLATE pg_catalog."default",
     role smallint,
     image bytea,
     CONSTRAINT user_pkey PRIMARY KEY (id),
-    CONSTRAINT name_unique UNIQUE (username)
+    CONSTRAINT name_unique UNIQUE (username),
+	CONSTRAINT email_unique UNIQUE (email)
 )
 
 TABLESPACE pg_default;
