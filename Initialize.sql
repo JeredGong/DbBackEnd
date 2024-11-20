@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS public.user
     password_hash character varying(512) COLLATE pg_catalog."default",
 	email character varying(256) COLLATE pg_catalog."default",
     role smallint,
-    image bytea,
+    image text,
     CONSTRAINT user_pkey PRIMARY KEY (id),
     CONSTRAINT name_unique UNIQUE (username),
 	CONSTRAINT email_unique UNIQUE (email)
@@ -45,6 +45,9 @@ ALTER TABLE IF EXISTS public.user
 
 INSERT INTO public.user(username, password_hash, role)
 	VALUES ('admin', 'admin', 0);
+
+INSERT INTO public.user(username, password_hash, role)
+	VALUES ('user', 'user', 1);
 
 
 -- docs: Information of documents
@@ -65,7 +68,7 @@ CREATE TABLE IF NOT EXISTS public.docs
 (
     id bigint NOT NULL DEFAULT nextval('docs_id_seq'::regclass),
     title character varying(256) COLLATE pg_catalog."default",
-    pdf_content bytea,
+    pdf_content text,
     uploaded_by bigint,
     download_count integer,
     upload_time timestamp with time zone,
@@ -73,6 +76,7 @@ CREATE TABLE IF NOT EXISTS public.docs
 	author character varying(128),
 	publish_date date,
     CONSTRAINT docs_pkey PRIMARY KEY (id),
+	CONSTRAINT docs_unique UNIQUE (pdf_content),
     CONSTRAINT uploaded_by_exist FOREIGN KEY (uploaded_by)
         REFERENCES public."user" (id) MATCH SIMPLE
         ON UPDATE NO ACTION
@@ -104,7 +108,7 @@ CREATE TABLE IF NOT EXISTS public.buff
 (
     id bigint NOT NULL DEFAULT nextval('buff_id_seq'::regclass),
     title character varying(256) COLLATE pg_catalog."default",
-    pdf_content bytea,
+    pdf_content text,
     uploaded_by bigint,
     download_count integer,
     upload_time timestamp with time zone,
@@ -112,6 +116,7 @@ CREATE TABLE IF NOT EXISTS public.buff
 	author character varying(128),
 	publish_date date,
     CONSTRAINT buff_pkey PRIMARY KEY (id),
+	CONSTRAINT buff_unique UNIQUE (pdf_content),
     CONSTRAINT uploaded_by_exist FOREIGN KEY (uploaded_by)
         REFERENCES public."user" (id) MATCH SIMPLE
         ON UPDATE NO ACTION
@@ -213,6 +218,7 @@ CREATE TABLE IF NOT EXISTS public.logs
     id bigint NOT NULL DEFAULT nextval('logs_id_seq'::regclass),
     user_id bigint,
     action character varying(512) COLLATE pg_catalog."default",
+	log_time timestamp with time zone,
     CONSTRAINT logs_pkey PRIMARY KEY (id),
     CONSTRAINT user_id_exist FOREIGN KEY (user_id)
         REFERENCES public."user" (id) MATCH SIMPLE

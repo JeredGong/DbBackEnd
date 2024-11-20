@@ -1,6 +1,6 @@
 use actix_web::{get, web::{self}, HttpRequest, HttpResponse, Error};
 use sqlx::PgPool;
-use super::user::CheckAdmin;
+use super::user::CheckUser;
 use super::logs::RecordLog;
 
 #[derive(serde::Serialize)]
@@ -9,17 +9,17 @@ struct StatisticsResponse {
     countDocs: i64
 }
 
-#[get("/statistics")]
-pub async fn Info(
+#[get("/stat")]
+pub async fn Statistics(
     pool: web::Data<PgPool>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
 
-    let claims = CheckAdmin(&request)?;
+    let claims = CheckUser(&pool, &request).await?;
 
     let mut transaction = pool.begin().await.map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to start transaction.")
+        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
     })?;
     
     let countBook = 
@@ -28,7 +28,7 @@ pub async fn Info(
             .await
             .map_err(|err| {
                 println!("Database error: {:?}", err);
-                actix_web::error::ErrorInternalServerError("Failed to get books borrowed count.")
+                actix_web::error::ErrorInternalServerError(format!("Failed to get books borrowed count.\nDatabase error: {}", err))
             })?;
 
     let countDocs = 
@@ -37,7 +37,7 @@ pub async fn Info(
             .await
             .map_err(|err| {
                 println!("Database error: {:?}", err);
-                actix_web::error::ErrorInternalServerError("Failed to get documents downloaded count.")
+                actix_web::error::ErrorInternalServerError(format!("Failed to get documents downloaded count.\nDatabase error: {}", err))
             })?; 
 
     let statisticsResponse = StatisticsResponse {
@@ -47,9 +47,9 @@ pub async fn Info(
 
     transaction.commit().await.map_err(|err| {
         println!("Transaction error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to commit transaction.")
+        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
     })?;
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Request for Statistics")).await?;
+    RecordLog(claims.id, &pool, format!("Request for Statistics")).await?;
     Ok(HttpResponse::Ok().json(statisticsResponse))
 }
