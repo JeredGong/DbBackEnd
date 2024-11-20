@@ -1,5 +1,5 @@
 use actix_web::{delete, get, post, put, web::{self, Json}, Error, HttpRequest, HttpResponse};
-use time::{OffsetDateTime, UtcOffset, Date};
+use time::{OffsetDateTime, UtcOffset, Date, Month};
 use sqlx::PgPool;
 use super::user::{CheckAdmin, CheckUser};
 use super::logs::RecordLog;
@@ -137,11 +137,11 @@ async fn List(
         .into_iter()
         .map(|book| BookResponse {
             id: book.id,
-            title: book.title.expect("Book title is missing."),
-            author: book.author.expect("Book author is missing."),
-            bookType: book.book_type.expect("Book type is missing."),
-            publishDate: book.publish_date.expect("Book publish date is missing."),
-            available: book.available.expect("Book available is missing.")
+            title: book.title.unwrap_or_default(),
+            author: book.author.unwrap_or_default(),
+            bookType: book.book_type.unwrap_or_default(),
+            publishDate: book.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            available: book.available.unwrap_or_default()
         }).collect();
 
     RecordLog(claims.id, &pool, format!("(Admininstrator) Request for book list")).await?;
@@ -184,7 +184,7 @@ async fn Search(
             title: record.title.unwrap_or_default(),    
             author: record.author.unwrap_or_default(),  
             bookType: record.book_type.unwrap_or_default(),
-            publishDate: record.publish_date.unwrap(),     
+            publishDate: record.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),     
             remain: record.remain.unwrap_or(0),
         }).collect();
 
@@ -350,8 +350,8 @@ async fn Records(
             id: rec.id,
             userID: rec.user_id,
             bookID: rec.book_id,
-            borrowedAt: rec.borrowed_at.expect("Borrowed time is missing").to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
-            returnedAt: rec.returned_at.expect("Returned time is missing").to_offset(UtcOffset::from_hms(8, 0, 0).unwrap())
+            borrowedAt: rec.borrowed_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
+            returnedAt: rec.returned_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap())
         }).collect();
     
     RecordLog(claims.id, &pool, format!("(Administrator) Request for all borrowing records")).await?;
@@ -381,8 +381,8 @@ async fn UserRecords(
             id: rec.id,
             userID: rec.user_id,
             bookID: rec.book_id,
-            borrowedAt: rec.borrowed_at.expect("Borrowed time is missing").to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
-            returnedAt: rec.returned_at.expect("Returned time is missing").to_offset(UtcOffset::from_hms(8, 0, 0).unwrap())
+            borrowedAt: rec.borrowed_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
+            returnedAt: rec.returned_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap())
         }).collect();
     
     RecordLog(claims.id, &pool, format!("Request for book self borrowed")).await?;

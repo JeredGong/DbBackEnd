@@ -46,7 +46,7 @@ pub fn UnwrapToken(
 
     let key = 
         std::env::var("ENCODING_KEY")
-            .expect("Encoding Key undefined.");
+            .unwrap_or_default();
 
     let validation = Validation::default();
 
@@ -176,7 +176,7 @@ pub async fn Login(
     // Token expiration timestamp
     let expiration = Utc::now()
         .checked_add_signed(Duration::minutes(30))
-        .expect("Valid timestamp")
+        .unwrap_or_default()
         .timestamp() as u64;
 
     let claims: Claims = Claims {
@@ -187,7 +187,7 @@ pub async fn Login(
 
     let key = 
         std::env::var("ENCODING_KEY")
-            .expect("Encoding Key undefined.");
+            .unwrap_or_default();
 
     // Calculate token (HS256 algorithm)
     let token = 
@@ -293,7 +293,7 @@ pub async fn GetImage(
             })?;
 
     let imageResponse: ImageResponse = ImageResponse {
-        image: image.image.expect("Image not found")
+        image: image.image.unwrap_or_default()
     };
 
     RecordLog(claims.id, &pool, format!("Fetch image")).await?;
@@ -437,8 +437,8 @@ pub async fn Users(
         .into_iter()
         .map(|user| UsersResponse {
             id: user.id,
-            username: user.username.expect("Username not found."),
-            role: user.role.expect("User role not found."),
+            username: user.username.unwrap_or_default(),
+            role: user.role.unwrap_or_default(),
             image: user.image.unwrap_or_default(),
             email: user.email.unwrap_or_default()
         }).collect();

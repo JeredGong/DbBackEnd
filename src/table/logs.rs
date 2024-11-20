@@ -57,8 +57,8 @@ async fn Logs(
             .into_iter()
             .map(|log| LogResponse {
                 id: log.id,
-                userID: log.user_id.expect("User ID not found."),
-                action: log.action.expect("Action not found.")
+                userID: log.user_id.unwrap_or_default(),
+                action: log.action.unwrap_or_default()
             }).collect();
     
     RecordLog(claims.id, &pool, format!("(Administrator) Request for logs")).await?;

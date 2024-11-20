@@ -1,5 +1,5 @@
 use actix_web::{delete, get, post, put, web::{self, Json}, HttpRequest, HttpResponse, Error};
-use time::{Date, OffsetDateTime, UtcOffset};
+use time::{Date, Month, OffsetDateTime, UtcOffset};
 use sqlx::PgPool;
 use super::user::{CheckAdmin, CheckUser, Role, UnwrapToken};
 use super::logs::RecordLog;
@@ -141,11 +141,11 @@ async fn List(
         .into_iter()
         .map(|doc| DocumentResponse {
             id: doc.id,
-            title: doc.title.expect("Document title is missing."),
-            author: doc.author.expect("Document author is missing."),
-            docType: doc.doc_type.expect("Document type is missing."),
-            publishDate: doc.publish_date.expect("Document publish time is missing."),
-            upload_date: doc.upload_time.expect("Upload date is missing.").to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
+            title: doc.title.unwrap_or_default(),
+            author: doc.author.unwrap_or_default(),
+            docType: doc.doc_type.unwrap_or_default(),
+            publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
             download_count: doc.download_count.unwrap_or(0),
         }).collect();
 
@@ -173,11 +173,11 @@ async fn GetBuffer(
         .into_iter()
         .map(|doc| DocumentResponse {
             id: doc.id,
-            title: doc.title.expect("Document title is missing."),
-            author: doc.author.expect("Document author is missing."),
-            docType: doc.doc_type.expect("Document type is missing."),
-            publishDate: doc.publish_date.expect("Document publish time is missing."),
-            upload_date: doc.upload_time.expect("Upload date is missing.").to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
+            title: doc.title.unwrap_or_default(),
+            author: doc.author.unwrap_or_default(),
+            docType: doc.doc_type.unwrap_or_default(),
+            publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
             download_count: doc.download_count.unwrap_or(0),
         }).collect();
 
@@ -232,8 +232,8 @@ async fn ConfirmBuffer(
         &document.title.unwrap_or_default(), 
         &document.author.unwrap_or_default(), 
         &document.doc_type.unwrap_or_default(), 
-        &document.publish_date.unwrap(), 
-        &document.upload_time.unwrap(), 
+        &document.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()), 
+        &document.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH), 
         &document.download_count.unwrap_or_default(), 
         &document.pdf_content.clone().unwrap_or_default()
     )
@@ -288,11 +288,11 @@ async fn Search(
         .into_iter()
         .map(|doc| DocumentResponse {
             id: doc.id,
-            title: doc.title.expect("Document title is missing."),
-            author: doc.author.expect("Document author is missing."),
-            docType: doc.doc_type.expect("Document type is missing."),
-            publishDate: doc.publish_date.expect("Document publish time is missing."),
-            upload_date: doc.upload_time.expect("Upload date is missing.").to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
+            title: doc.title.unwrap_or_default(),
+            author: doc.author.unwrap_or_default(),
+            docType: doc.doc_type.unwrap_or_default(),
+            publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
             download_count: doc.download_count.unwrap_or(0),
         }).collect();
 

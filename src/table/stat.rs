@@ -41,8 +41,8 @@ pub async fn Info(
             })?; 
 
     let statisticsResponse = StatisticsResponse {
-        countBook: countBook.count.expect("Failed to fetch count of books borrowed."),
-        countDocs: countDocs.sum.expect("Failed to fetch count of documents downloaded.")
+        countBook: countBook.count.unwrap_or_default(),
+        countDocs: countDocs.sum.unwrap_or_default()
     };
 
     transaction.commit().await.map_err(|err| {
