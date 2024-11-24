@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS public.docs
 	author character varying(128),
 	publish_date date,
     CONSTRAINT docs_pkey PRIMARY KEY (id),
-	CONSTRAINT docs_unique UNIQUE (pdf_content),
+	CONSTRAINT docs_unique UNIQUE (title, author, doc_type, publish_date),
     CONSTRAINT uploaded_by_exist FOREIGN KEY (uploaded_by)
         REFERENCES public."user" (id) MATCH SIMPLE
         ON UPDATE NO ACTION
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS public.buff
 	author character varying(128),
 	publish_date date,
     CONSTRAINT buff_pkey PRIMARY KEY (id),
-	CONSTRAINT buff_unique UNIQUE (pdf_content),
+	CONSTRAINT buff_unique UNIQUE (title, author, doc_type, publish_date),
     CONSTRAINT uploaded_by_exist FOREIGN KEY (uploaded_by)
         REFERENCES public."user" (id) MATCH SIMPLE
         ON UPDATE NO ACTION
