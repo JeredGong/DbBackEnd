@@ -3,7 +3,11 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use sqlx::PgPool;
 use super::logs::RecordLog;
-
+use std::fs::{self, File};
+use std::io::Write;
+use uuid::Uuid;
+use std::path::Path;
+use serde::Deserialize; // 确保引入了 serde::Deserialize
 /*
  *  PostgreSQL schema 
  * 
@@ -143,7 +147,7 @@ struct UsersRequest {
     password_hash: String,
     email: String,
     role: i16,
-    image: String
+    image: Vec<u8> // 使用 Vec<u8> 存储二进制图像数据
 }
 
 #[derive(serde::Serialize)]
@@ -157,12 +161,26 @@ struct UsersResponse {
 
 #[derive(serde::Deserialize)]
 struct ModifyRequest {
-    content: String
+    pub image: Vec<u8>
+}
+
+#[derive(serde::Deserialize)]
+struct PasswordRequest {
+    pub password_hash: String
+}
+
+#[derive(serde::Deserialize)]
+struct EmailRequest {
+    pub email: String
 }
 
 #[derive(serde::Serialize)]
 struct ImageResponse {
     image: String
+}
+#[derive(Deserialize)]
+pub struct ImageRequest {
+    pub image_path: String, // 图像路径
 }
 
 #[post("/user/login")]
@@ -191,7 +209,7 @@ pub async fn Login(
 
     // Token expiration timestamp
     let expiration = Utc::now()
-        .checked_add_signed(Duration::minutes(30))
+        .checked_add_signed(Duration::minutes(90))
         .unwrap_or_default()
         .timestamp() as u64;
 
@@ -224,10 +242,9 @@ pub async fn Login(
 pub async fn Register(
     pool: web::Data<PgPool>,
     usersReq: Json<UsersRequest>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
-    // Non-administrator accounts cannot create accounts
+    // 检查管理员权限
     let claims = CheckAdmin(&pool, &request).await?;
 
     let mut transaction = pool.begin().await.map_err(|err| {
@@ -235,31 +252,62 @@ pub async fn Register(
         actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
     })?;
 
-    // Insert a new user
-    sqlx::query!("INSERT INTO \"user\" (username, password_hash, email, role, image) VALUES ($1, $2, $3, $4, $5)", 
-        &usersReq.username, &usersReq.password_hash, &usersReq.email, &usersReq.role, &usersReq.image) 
-        .execute(&mut transaction)
+    // 创建唯一文件路径
+    let unique_filename = format!("{}.jpg", Uuid::new_v4());
+    let upload_dir = "./uploads/avatars";
+    let filepath = format!("{}/{}", upload_dir, unique_filename);
+
+    // 确保上传目录存在
+    fs::create_dir_all(upload_dir).map_err(|err| {
+        println!("Failed to create upload directory: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to create upload directory")
+    })?;
+
+    // 保存图像到文件系统
+    let mut file = File::create(&filepath).map_err(|err| {
+        println!("Failed to create file: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to save image")
+    })?;
+    file.write_all(&usersReq.image).map_err(|err| {
+        println!("Failed to write image file: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to save image")
+    })?;
+
+    // 构造数据库中存储的图像路径（相对路径）
+    let image_path_in_db = format!("/avatars/{}", unique_filename);
+
+    // 插入新用户
+    sqlx::query!(
+        "INSERT INTO \"user\" (username, password_hash, email, role, image) VALUES ($1, $2, $3, $4, $5)",
+        &usersReq.username,
+        &usersReq.password_hash,
+        &usersReq.email,
+        &usersReq.role,
+        &image_path_in_db
+    )
+    .execute(&mut transaction)
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+    })?;
+
+    let user = sqlx::query!("SELECT id FROM \"user\" WHERE username = $1", &usersReq.username)
+        .fetch_one(&mut transaction)
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorForbidden(format!("Fetch user ID failed.\nDatabase error: {}", err))
         })?;
 
-    let user = 
-        sqlx::query!("SELECT id FROM \"user\" WHERE username = $1", &usersReq.username)
-            .fetch_one(&mut transaction)
-            .await
-            .map_err(|err| {
-                println!("Database error: {:?}", err);
-                actix_web::error::ErrorForbidden(format!("Fetch user ID failed.\nDatabase error: {}", err))
-            })?;
-    
     transaction.commit().await.map_err(|err| {
         println!("Transaction error: {:?}", err);
         actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
     })?;
-    
-    RecordLog(claims.id, &pool, format!("(Administrator) Register user of ID {}", user.id)).await?;
+
+    // 记录日志
+    RecordLog(claims.id, &pool, format!("(Administrator) Registered user with ID {}", user.id)).await?;
+
     Ok(HttpResponse::Ok().body("Register success."))
 }
 
@@ -320,14 +368,39 @@ pub async fn GetImage(
 pub async fn ModifyImage(
     pool: web::Data<PgPool>,
     imageReq: Json<ModifyRequest>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
+    // 检查用户权限
     let claims = CheckUser(&pool, &request).await?;
-    
+
+    // 创建唯一文件路径
+    let unique_filename = format!("{}.jpg", Uuid::new_v4());
+    let upload_dir = "./uploads/avatars";
+    let filepath = format!("{}/{}", upload_dir, unique_filename);
+
+    // 确保上传目录存在
+    fs::create_dir_all(upload_dir).map_err(|err| {
+        println!("Failed to create upload directory: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to create upload directory")
+    })?;
+
+    // 保存图像到文件系统
+    let mut file = File::create(&filepath).map_err(|err| {
+        println!("Failed to create file: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to save image")
+    })?;
+    file.write_all(&imageReq.image).map_err(|err| {
+        println!("Failed to write image file: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to save image")
+    })?;
+
+    // 构造数据库中存储的图像路径（相对路径）
+    let image_path_in_db = format!("/avatars/{}", unique_filename);
+
+    // 更新用户的图像路径到数据库
     sqlx::query!(
         "UPDATE \"user\" SET image = $1 WHERE id = $2",
-        &imageReq.content,
+        &image_path_in_db,
         &claims.id
     )
     .execute(pool.get_ref())
@@ -337,14 +410,16 @@ pub async fn ModifyImage(
         actix_web::error::ErrorInternalServerError(format!("Failed to update user image.\nDatabase error: {}", err))
     })?;
 
-    RecordLog(claims.id, &pool, format!("Modify image")).await?;
-    Ok(HttpResponse::Ok().body("User image modified success."))
+    // 记录日志
+    RecordLog(claims.id, &pool, "Modify image".to_string()).await?;
+
+    Ok(HttpResponse::Ok().body("User image modified successfully."))
 }
 
 #[put("/user/password")]
 pub async fn ModifyPasswd(
     pool: web::Data<PgPool>,
-    passwdReq: Json<ModifyRequest>,
+    passwdReq: Json<PasswordRequest>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
 
@@ -352,7 +427,7 @@ pub async fn ModifyPasswd(
     
     sqlx::query!(
         "UPDATE \"user\" SET password_hash = $1 WHERE id = $2",
-        &passwdReq.content,
+        &passwdReq.password_hash,
         &claims.id
     )
     .execute(pool.get_ref())
@@ -369,7 +444,7 @@ pub async fn ModifyPasswd(
 #[put("/user/email")]
 pub async fn ModifyEmail(
     pool: web::Data<PgPool>,
-    emailReq: Json<ModifyRequest>,
+    emailReq: Json<EmailRequest>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
 
@@ -377,7 +452,7 @@ pub async fn ModifyEmail(
     
     sqlx::query!(
         "UPDATE \"user\" SET email = $1 WHERE id = $2",
-        &emailReq.content,
+        &emailReq.email,
         &claims.id
     )
     .execute(pool.get_ref())
@@ -507,4 +582,35 @@ pub async fn Dngrade(
 
     RecordLog(claims.id, &pool, format!("(Administrator) Dngrade user of ID {}", *userID)).await?;
     Ok(HttpResponse::Ok().body("Dngrade user successfully."))
+}
+
+#[get("/user/imagefile")]
+pub async fn GetImageFile(
+    query: web::Query<ImageRequest> // 接收前端提供的图像路径
+) -> Result<HttpResponse, Error> {
+    let image_path = &query.image_path;
+
+    // 验证图像路径是否合法
+    if image_path.contains("..") || image_path.contains("/") && !image_path.starts_with("/avatars/") {
+        return Err(actix_web::error::ErrorBadRequest("Invalid image path"));
+    }
+
+    // 构造完整的文件路径
+    let base_dir = "./uploads"; // 文件存储的根目录
+    let full_path = format!("{}{}", base_dir, image_path);
+
+    // 检查文件是否存在
+    if !Path::new(&full_path).exists() {
+        return Err(actix_web::error::ErrorNotFound("Image not found"));
+    }
+
+    // 读取文件并返回
+    let image_data = std::fs::read(&full_path).map_err(|err| {
+        println!("Failed to read image file: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to read image file")
+    })?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("image/jpg") // 假设所有图像都是 JPG 格式
+        .body(image_data))
 }

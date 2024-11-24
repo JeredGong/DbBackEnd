@@ -3,6 +3,9 @@ use time::{Date, Month, OffsetDateTime, UtcOffset};
 use sqlx::PgPool;
 use super::user::{CheckAdmin, CheckUser, Role, UnwrapToken};
 use super::logs::RecordLog;
+use tokio::fs::{self, File};
+use tokio::io::AsyncWriteExt;
+use uuid::Uuid;
 
 /*
  *  PostgreSQL schema 
@@ -10,7 +13,7 @@ use super::logs::RecordLog;
  *      docs(
  *          id              bigint PRIMARY KEY,
  *          title           character varying(256),
- *          pdf_content     text,
+ *          file_path       text,
  *          uploaded_by     bigint,
  *          download_count  integer,
  *          upload_date     timestamp with time zone,
@@ -22,7 +25,7 @@ use super::logs::RecordLog;
  *      buff(
  *          id              bigint PRIMARY KEY,
  *          title           character varying(256),
- *          pdf_content     text,
+ *          file_path       text,
  *          uploaded_by     bigint,
  *          download_count  integer,
  *          upload_date     timestamp with time zone,
@@ -32,12 +35,31 @@ use super::logs::RecordLog;
  *      )
  */
 
+
+
+// 保存文件并返回路径
+async fn save_file(content: &Vec<u8>, upload_dir: &str) -> Result<String, std::io::Error> {
+    // 确保上传目录存在
+    fs::create_dir_all(upload_dir).await?;
+
+    // 生成唯一文件名
+    let file_name = format!("{}.pdf", Uuid::new_v4());
+    let file_path = format!("{}/{}", upload_dir, file_name);
+
+    // 将内容写入文件
+    let mut file = File::create(&file_path).await?;
+    file.write_all(content).await?;
+
+    Ok(file_path)
+}
+
+
 #[derive(serde::Deserialize)]
 struct DocumentRequest {
     title: String,
     author: String,
     docType: String,
-    pdfContent: String,
+    pdfContent: Vec<u8>,
     publishDate: Date
 }
 
@@ -56,67 +78,68 @@ struct DocumentResponse {
 async fn Add(
     pool: web::Data<PgPool>,
     docsReq: Json<DocumentRequest>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
+    request: HttpRequest,
+) -> Result<HttpResponse, actix_web::Error> {
     let claims = CheckUser(&pool, &request).await?;
 
-    if Role::toRole(claims.role).unwrap() == Role::Admin {              // Administrator can upload documents directly.
-        
+    // 保存文件到服务器并获取文件路径
+    let file_path = save_file(&docsReq.pdfContent, "./uploads/buffer")
+        .await
+        .map_err(|err| {
+            println!("File save error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to save PDF file")
+        })?;
+
+    if Role::toRole(claims.role).unwrap() == Role::Admin {
+        // 管理员直接保存到 docs 表
         sqlx::query!(
-            "INSERT INTO docs (title, author, doc_type, pdf_content, publish_date, uploaded_by, download_count, upload_time) 
+            "INSERT INTO docs (title, author, doc_type, file_path, publish_date, uploaded_by, download_count, upload_time) 
                 VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
             &docsReq.title,
             &docsReq.author,
             &docsReq.docType,
-            &docsReq.pdfContent,
+            &file_path,
             &docsReq.publishDate,
-            UnwrapToken(&pool, &request).await?.id
+            claims.id
         )
         .execute(pool.get_ref())
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to add document.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError("Failed to insert into docs table")
         })?;
-    
-        let document = 
-            sqlx::query!("SELECT id FROM docs WHERE title = $1 and pdf_content = $2", 
-                &docsReq.title, &docsReq.pdfContent)
-            .fetch_one(pool.get_ref())
-            .await
-            .map_err(|err| {
-                println!("Database error: {:?}", err);
-                actix_web::error::ErrorInternalServerError(format!("Failed to fetch document id.\nDatabase error: {}", err))
-            })?;
-    
-        RecordLog(claims.id, &pool, format!("(Administrator) Add document of ID {}", document.id)).await?;
-        Ok(HttpResponse::Ok().body("Document added successfully."))
-
-    } else /* if Role::toRole(claims.role).unwrap() == Role::User */ {  // Users should upload documents and wait for examination
-
+    } else {
+        // 普通用户保存到 buff 表
         sqlx::query!(
-            "INSERT INTO buff (title, author, doc_type, pdf_content, publish_date, uploaded_by, download_count, upload_time) 
+            "INSERT INTO buff (title, author, doc_type, file_path, publish_date, uploaded_by, download_count, upload_time) 
                 VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
             &docsReq.title,
             &docsReq.author,
             &docsReq.docType,
-            &docsReq.pdfContent,
+            &file_path,
             &docsReq.publishDate,
-            UnwrapToken(&pool, &request).await?.id
+            claims.id
         )
         .execute(pool.get_ref())
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to push document into buffer.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError("Failed to insert into buff table")
         })?;
-    
-        RecordLog(claims.id, &pool, format!("(User) Push document into buffer")).await?;
-        Ok(HttpResponse::Ok().body("Document pushed into buffer successfully."))
+    }
 
-    } 
+    RecordLog(claims.id, &pool, format!("Upload document '{}'", docsReq.title))
+        .await
+        .map_err(|err| {
+            println!("Log record error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to record log")
+        })?;
+
+    Ok(HttpResponse::Ok().body("Document uploaded successfully."))
 }
+
+
+
 
 #[get("/docs/all")]
 async fn List(
@@ -189,38 +212,56 @@ async fn GetBuffer(
 async fn DownloadBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
-    let document = sqlx::query!("SELECT pdf_content FROM buff WHERE id = $1", *buffID)
+    // 查询文件路径
+    let document = sqlx::query!("SELECT file_path FROM buff WHERE id = $1", *buffID)
         .fetch_one(pool.get_ref())
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorNotFound(format!("Document not found.\nDatabase error: {}", err))
+            actix_web::error::ErrorNotFound("Document not found")
         })?;
 
-    RecordLog(claims.id, &pool, format!("(Admininstrator) Download document in buffer of ID {}", *buffID)).await?;
-    Ok(HttpResponse::Ok().body(document.pdf_content.unwrap_or_default()))
+    let file_path = document.file_path.unwrap_or_default();
+
+    // 读取文件内容
+    let pdf_content = tokio::fs::read(&file_path).await.map_err(|err| {
+        println!("File read error: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to read PDF file")
+    })?;
+
+    RecordLog(claims.id, &pool, format!("Download buffer document ID {}", buffID)).await?;
+    Ok(HttpResponse::Ok().content_type("application/pdf").body(pdf_content))
 }
+
 
 #[put("/docs/buffer/{id}")]
 async fn EditBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
     docsReq: Json<DocumentRequest>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
-    sqlx::query!("UPDATE buff SET title = $1, author = $2, doc_type = $3, pdf_content = $4, publish_date = $5 WHERE id = $6", 
+    // 保存新的文件内容
+    let new_file_path = save_file(&docsReq.pdfContent, "./uploads/buffer")
+        .await
+        .map_err(|err| {
+            println!("File save error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to save PDF file")
+        })?;
+
+    // 更新数据库记录
+    sqlx::query!(
+        "UPDATE buff SET title = $1, author = $2, doc_type = $3, file_path = $4, publish_date = $5 WHERE id = $6",
         &docsReq.title,
         &docsReq.author,
         &docsReq.docType,
-        &docsReq.pdfContent,
+        &new_file_path,
         &docsReq.publishDate,
         *buffID
     )
@@ -228,77 +269,96 @@ async fn EditBuffer(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorNotFound(format!("Edit document failed.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError("Failed to edit buffer document")
     })?;
 
-    RecordLog(claims.id, &pool, format!("(Admininstrator) Edit document in buffer of ID {}", *buffID)).await?;
-    Ok(HttpResponse::Ok().body("Edit document successfully."))
+    RecordLog(claims.id, &pool, format!("Edit buffer document ID {}", buffID)).await?;
+    Ok(HttpResponse::Ok().body("Buffer document updated successfully."))
 }
+
 
 #[post("/docs/buffer/{id}")]
 async fn ConfirmBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
-    let mut transaction = pool.begin().await.map_err(|err| {
+    let mut transaction = pool.begin().await.map(|t| t).map_err(|err| {
         println!("Database error: {:?}", err);
         actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
     })?;
 
-    let document = sqlx::query!("SELECT id, title, author, doc_type, publish_date, upload_time, download_count, pdf_content FROM buff WHERE id = $1", *buffID)
-        .fetch_one(&mut transaction)
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorNotFound(format!("Document not found.\nDatabase error: {}", err))
-        })?;
+    // 查询缓冲区文档
+    let document = sqlx::query!(
+        "SELECT id, title, author, doc_type, publish_date, upload_time, download_count, file_path FROM buff WHERE id = $1",
+        *buffID
+    )
+    .fetch_one(&mut transaction)
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorNotFound(format!("Document not found in buffer.\nDatabase error: {}", err))
+    })?;
 
-    sqlx::query!("INSERT INTO docs (title, author, doc_type, publish_date, upload_time, download_count, pdf_content) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        &document.title.unwrap_or_default(), 
-        &document.author.unwrap_or_default(), 
-        &document.doc_type.unwrap_or_default(), 
-        &document.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()), 
-        &document.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH), 
-        &document.download_count.unwrap_or_default(), 
-        &document.pdf_content.clone().unwrap_or_default()
+    // 将文档插入到 docs 表
+    sqlx::query!(
+        "INSERT INTO docs (title, author, doc_type, publish_date, upload_time, download_count, file_path) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        &document.title.unwrap_or_default(),
+        &document.author.unwrap_or_default(),
+        &document.doc_type.unwrap_or_default(),
+        &document.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+        &document.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH),
+        document.download_count.unwrap_or_default(),
+        &document.file_path.unwrap_or_default()
     )
     .execute(&mut transaction)
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorNotFound(format!("Document cannot be inserted.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!("Failed to insert document into docs table.\nDatabase error: {}", err))
     })?;
 
+    // 删除缓冲区中的文档
     sqlx::query!("DELETE FROM buff WHERE id = $1", *buffID)
         .execute(&mut transaction)
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorNotFound(format!("Document cannot be deleted.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!("Failed to delete document from buffer.\nDatabase error: {}", err))
         })?;
 
-    transaction.commit().await.map_err(|err| {
-        println!("Transaction error: {:?}", err);
+    transaction.commit().await.map(|_| ()).map_err(|err| {
+        println!("Database error: {:?}", err);
         actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
     })?;
-
-    RecordLog(claims.id, &pool, format!("(Admininstrator) Confirm document in buffer of ID {}", *buffID)).await?;
-    Ok(HttpResponse::Ok().body("Confirm document successfully."))
+    RecordLog(claims.id, &pool, format!("Confirm buffer document ID {}", buffID)).await?;
+    Ok(HttpResponse::Ok().body("Buffer document confirmed successfully."))
 }
+
 
 #[delete("/docs/buffer/{id}")]
 async fn RefuseBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
+    // 查询文档的文件路径
+    let document = sqlx::query!("SELECT file_path FROM buff WHERE id = $1", *buffID)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorNotFound(format!("Document not found in buffer.\nDatabase error: {}", err))
+        })?;
+
+    let file_path = document.file_path.unwrap_or_default();
+
+    // 删除数据库记录
     sqlx::query!("DELETE FROM buff WHERE id = $1", *buffID)
         .execute(pool.get_ref())
         .await
@@ -307,9 +367,18 @@ async fn RefuseBuffer(
             actix_web::error::ErrorNotFound(format!("Delete document failed.\nDatabase error: {}", err))
         })?;
 
-    RecordLog(claims.id, &pool, format!("(Admininstrator) Refuse document in buffer of ID {}", *buffID)).await?;
+    // 删除文件系统中的文件
+    if !file_path.is_empty() {
+        tokio::fs::remove_file(&file_path).await.map_err(|err| {
+            println!("File delete error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to delete document file from storage")
+        })?;
+    }
+
+    RecordLog(claims.id, &pool, format!("(Administrator) Refuse document in buffer of ID {}", *buffID)).await?;
     Ok(HttpResponse::Ok().body("Refuse document successfully."))
 }
+
 
 
 #[get("/docs/search/{title}")]
@@ -355,57 +424,65 @@ async fn Search(
 async fn Download(
     pool: web::Data<PgPool>,
     docsID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckUser(&pool, &request).await?;
 
-    let mut transaction = pool.begin().await.map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
-    })?;
-
-    let document = sqlx::query!("SELECT pdf_content FROM docs WHERE id = $1", *docsID)
-        .fetch_one(&mut transaction)
+    // 查询文件路径
+    let document = sqlx::query!("SELECT file_path FROM docs WHERE id = $1", *docsID)
+        .fetch_one(pool.get_ref())
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
             actix_web::error::ErrorNotFound(format!("Document not found.\nDatabase error: {}", err))
         })?;
 
+    let file_path = document.file_path.unwrap_or_default();
+
+    // 读取文件内容
+    let pdf_content = tokio::fs::read_to_string(&file_path).await.map_err(|err| {
+        println!("File read error: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to read PDF file")
+    })?;
+
+    // 更新下载次数
     sqlx::query!("UPDATE docs SET download_count = download_count + 1 WHERE id = $1", *docsID)
-        .execute(&mut transaction)
+        .execute(pool.get_ref())
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
             actix_web::error::ErrorInternalServerError(format!("Failed to update download count.\nDatabase error: {}", err))
         })?;
 
-    transaction.commit().await.map_err(|err| {
-        println!("Transaction error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
-    })?;
-
-    RecordLog(claims.id, &pool, format!("Download document of ID {}", docsID)).await?;
-    Ok(HttpResponse::Ok().body(document.pdf_content.unwrap_or_default()))
+    RecordLog(claims.id, &pool, format!("Download document ID {}", docsID)).await?;
+    Ok(HttpResponse::Ok().content_type("application/pdf").body(pdf_content))
 }
+
 
 #[put("/docs/{id}")]
 async fn Edit(
     pool: web::Data<PgPool>,
     docsID: web::Path<i64>,
     docsReq: Json<DocumentRequest>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
+    // 保存新的文件内容
+    let new_file_path = save_file(&docsReq.pdfContent, "./uploads/docs")
+        .await
+        .map_err(|err| {
+            println!("File save error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to save PDF file")
+        })?;
+
+    // 更新数据库记录
     sqlx::query!(
-        "UPDATE docs SET title = $1, author = $2, doc_type = $3, pdf_content = $4, publish_date = $5 WHERE id = $6",
+        "UPDATE docs SET title = $1, author = $2, doc_type = $3, file_path = $4, publish_date = $5 WHERE id = $6",
         &docsReq.title,
         &docsReq.author,
         &docsReq.docType,
-        &docsReq.pdfContent,
+        &new_file_path,
         &docsReq.publishDate,
         *docsID
     )
@@ -416,9 +493,10 @@ async fn Edit(
         actix_web::error::ErrorInternalServerError(format!("Failed to edit document.\nDatabase error: {}", err))
     })?;
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Edit document of ID {}", docsID)).await?;
+    RecordLog(claims.id, &pool, format!("Edit document ID {}", docsID)).await?;
     Ok(HttpResponse::Ok().body("Document updated successfully."))
 }
+
 
 #[delete("/docs/{id}")]
 async fn Delete(
