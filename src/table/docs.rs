@@ -6,7 +6,8 @@ use super::logs::RecordLog;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
-
+use serde::{Deserialize, Serialize};
+use base64::{engine::general_purpose, Engine}; // 引入 Engine 模块
 /*
  *  PostgreSQL schema 
  * 
@@ -53,12 +54,23 @@ async fn save_file(content: &Vec<u8>, upload_dir: &str) -> Result<String, std::i
     Ok(file_path)
 }
 
+fn base64_to_vec<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let base64_str = String::deserialize(deserializer)?; // 获取 Base64 字符串
+    general_purpose::STANDARD
+        .decode(&base64_str) // 使用新的 Engine API
+        .map_err(serde::de::Error::custom) // 解码错误处理
+}
 
-#[derive(serde::Deserialize)]
+
+#[derive(Serialize, Deserialize)]
 struct DocumentRequest {
     title: String,
     author: String,
     docType: String,
+    #[serde(deserialize_with = "base64_to_vec")]
     pdfContent: Vec<u8>,
     publishDate: Date
 }
