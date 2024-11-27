@@ -80,6 +80,7 @@ struct DocumentResponse {
     id: i64,
     title: String,
     author: String,
+    uploadedBy: String,
     docType: String,
     publishDate: Date,
     upload_date: OffsetDateTime,
@@ -164,13 +165,17 @@ async fn List(
         Err(_) => 0
     };
 
-    let documents = sqlx::query!("SELECT id, title, author, doc_type, publish_date, upload_time, download_count FROM docs")
-        .fetch_all(pool.get_ref())
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
-        })?;
+    let documents = sqlx::query!("
+        SELECT docs.id, docs.title, docs.author, \"user\".username AS uploaded_by, docs.doc_type, docs.publish_date, docs.upload_time, docs.download_count
+        FROM docs
+        JOIN \"user\" ON \"user\".id = docs.uploaded_by"
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
+    })?;
 
     let docsResponse: Vec<DocumentResponse> = documents
         .into_iter()
@@ -178,6 +183,7 @@ async fn List(
             id: doc.id,
             title: doc.title.unwrap_or_default(),
             author: doc.author.unwrap_or_default(),
+            uploadedBy: doc.uploaded_by.unwrap_or_default(),
             docType: doc.doc_type.unwrap_or_default(),
             publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
             upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
@@ -196,13 +202,17 @@ async fn GetBuffer(
 
     let claims = CheckAdmin(&pool, &request).await?;
 
-    let documents = sqlx::query!("SELECT id, title, author, doc_type, publish_date, upload_time, download_count FROM buff")
-        .fetch_all(pool.get_ref())
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
-        })?;
+    let documents = sqlx::query!("
+        SELECT buff.id, buff.title, buff.author, \"user\".username AS uploaded_by, buff.doc_type, buff.publish_date, buff.upload_time, buff.download_count
+        FROM buff
+        JOIN \"user\" ON \"user\".id = buff.uploaded_by"
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
+    })?;
 
     let docsResponse: Vec<DocumentResponse> = documents
         .into_iter()
@@ -210,6 +220,7 @@ async fn GetBuffer(
             id: doc.id,
             title: doc.title.unwrap_or_default(),
             author: doc.author.unwrap_or_default(),
+            uploadedBy: doc.uploaded_by.unwrap_or_default(),
             docType: doc.doc_type.unwrap_or_default(),
             publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
             upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
@@ -405,8 +416,10 @@ async fn Search(
         Err(_) => 0
     };
 
-    let documents = sqlx::query!(
-        "SELECT id, title, author, doc_type, publish_date, upload_time, download_count FROM docs WHERE title LIKE $1",
+    let documents = sqlx::query!("
+        SELECT docs.id, title, author, \"user\".username AS uploaded_by, doc_type, publish_date, upload_time, download_count 
+        FROM docs JOIN \"user\" ON \"user\".id = docs.uploaded_by
+        WHERE title LIKE $1",
         format!("%{}%", *docsTitle)
     )
     .fetch_all(pool.get_ref())
@@ -422,6 +435,7 @@ async fn Search(
             id: doc.id,
             title: doc.title.unwrap_or_default(),
             author: doc.author.unwrap_or_default(),
+            uploadedBy: doc.uploaded_by.unwrap_or_default(),
             docType: doc.doc_type.unwrap_or_default(),
             publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
             upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 

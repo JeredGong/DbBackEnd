@@ -407,6 +407,7 @@ async fn UserRecords(
     RecordLog(claims.id, &pool, format!("Request for book self borrowed")).await?;
     Ok(HttpResponse::Ok().json(recordResponse))
 }
+
 #[get("/book/{id}")]
 async fn GetBookById(
     pool: web::Data<PgPool>,      // 数据库连接池
@@ -415,33 +416,49 @@ async fn GetBookById(
 ) -> Result<HttpResponse, Error> {
 
     // 检查用户是否为管理员
-    let claims = CheckAdmin(&pool, &request).await?;
+    let claims = CheckUser(&pool, &request).await?;
 
-    // 查询数据库获取书籍信息
-    let book = sqlx::query!(
-        "SELECT id, title, author, book_type, publish_date, available 
-        FROM book WHERE id = $1", 
+    let book = sqlx::query!("
+        SELECT
+            id_list,
+            title,
+            author,
+            book_type,
+            publish_date,
+            remain
+        FROM 
+            (SELECT
+                ARRAY_AGG(id) AS id_list,
+                title,
+                author,
+                book_type,
+                publish_date,
+                COUNT(*) AS remain
+            FROM book
+            WHERE id = $1 AND available = true
+            GROUP BY title, author, book_type, publish_date) AS sames
+        WHERE title = sames.title AND author = sames.author AND book_type = sames.book_type AND publish_date = sames.publish_date",
         *bookID
     )
     .fetch_one(pool.get_ref())
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to fetch book details.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!("Failed to fetch book details by ID.\nDatabase error: {}", err))
     })?;
 
     // 构建响应数据
-    let bookResponse = BookResponse {
-        id: book.id,
+    let bookResponse = SearchResponse {
+        idList: book.id_list.unwrap_or_default(),
         title: book.title.unwrap_or_default(),
         author: book.author.unwrap_or_default(),
         bookType: book.book_type.unwrap_or_default(),
         publishDate: book.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
-        available: book.available.unwrap_or(false),
+        remain: book.remain.unwrap_or_default()
     };
 
     // 记录日志
-    RecordLog(claims.id, &pool, format!("(Administrator) Fetch book details of ID {}", bookID)).await?;
+    RecordLog(claims.id, &pool, format!("Fetch book details of ID {}", bookID)).await?;
 
     // 返回书籍信息
     Ok(HttpResponse::Ok().json(bookResponse))

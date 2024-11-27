@@ -55,6 +55,7 @@ async fn main() -> std::io::Result<()> {
             .service(book::Borrow)          // POST     /book/borrow/{id}       Borrow a book
             .service(book::Return)          // POST     /book/return/{id}       Return a book
             .service(book::Records)         // GET      /book/borrowings/all    Fetch all borrowing records (Admin)
+            .service(book::GetBookById)     // GET      /book/{id}              Fetch all borrowing records (Admin)
             .service(book::UserRecords)     // GET      /book/borrowings        Fetch user borrowing records
             .service(stat::Statistics)      // GET      /stat                   Fetch statistics (Admin)
             .service(logs::Logs)            // GET      /logs                   Fetch logs (Admin)
