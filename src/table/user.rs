@@ -178,9 +178,15 @@ struct EmailRequest {
 struct ImageResponse {
     image: String
 }
+
 #[derive(Deserialize)]
 pub struct ImageRequest {
-    pub image_path: String, // 图像路径
+    pub image_path: String // 图像路径
+}
+
+#[derive(Deserialize)]
+struct UsernameRequest {
+    username: String
 }
 
 #[post("/user/login")]
@@ -464,6 +470,31 @@ pub async fn ModifyEmail(
 
     RecordLog(claims.id, &pool, format!("Modify email")).await?;
     Ok(HttpResponse::Ok().body("User email modified success."))
+}
+
+#[put("/user/username")]
+pub async fn ModifyUsername(
+    pool: web::Data<PgPool>,
+    usernameReq: Json<UsernameRequest>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+
+    let claims = CheckUser(&pool, &request).await?;
+    
+    sqlx::query!(
+        "UPDATE \"user\" SET username = $1 WHERE id = $2",
+        &usernameReq.username,
+        &claims.id
+    )
+    .execute(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to update user username.\nDatabase error: {}", err))
+    })?;
+
+    RecordLog(claims.id, &pool, format!("Modify username")).await?;
+    Ok(HttpResponse::Ok().body("User username modified success."))
 }
 
 #[delete("/user/cancel")]

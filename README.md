@@ -23,6 +23,7 @@ GET      /user/image             Fetch user image
 PUT      /user/image             Modify user image
 PUT      /user/password          Modify user password
 PUT      /user/email             Modify user email
+PUT      /user/username          Modify user username
 DELETE   /user/cancel            Cancel user account
 DELETE   /user/delete/{id}       Delete user account (Admin)
 GET      /user/all               Fetch user list (Admin)
@@ -47,6 +48,7 @@ DELETE   /book/{id}              Delete a book (Admin)
 POST     /book/borrow/{id}       Borrow a book
 POST     /book/return/{id}       Return a book
 GET      /book/borrowings/all    Fetch all borrowing records (Admin)
+GET      /book/{id}              Fetch book information by ID
 GET      /book/borrowings        Fetch user borrowing records
 GET      /stat                   Fetch statistics (Admin)
 GET      /logs                   Fetch logs (Admin)

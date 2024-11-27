@@ -31,6 +31,7 @@ async fn main() -> std::io::Result<()> {
             .service(user::ModifyImage)     // PUT      /user/image             Modify user image
             .service(user::ModifyPasswd)    // PUT      /user/password          Modify user password
             .service(user::ModifyEmail)     // PUT      /user/email             Modify user email
+            .service(user::ModifyUsername)  // PUT      /user/username          Modify user username
             .service(user::Cancel)          // DELETE   /user/cancel            Cancel user account
             .service(user::Delete)          // DELETE   /user/delete/{id}       Delete user account (Admin)
             .service(user::Users)           // GET      /user/all               Fetch user list (Admin)
@@ -55,7 +56,7 @@ async fn main() -> std::io::Result<()> {
             .service(book::Borrow)          // POST     /book/borrow/{id}       Borrow a book
             .service(book::Return)          // POST     /book/return/{id}       Return a book
             .service(book::Records)         // GET      /book/borrowings/all    Fetch all borrowing records (Admin)
-            .service(book::GetBookById)     // GET      /book/{id}              Fetch all borrowing records (Admin)
+            .service(book::GetBookById)     // GET      /book/{id}              Fetch book information by ID
             .service(book::UserRecords)     // GET      /book/borrowings        Fetch user borrowing records
             .service(stat::Statistics)      // GET      /stat                   Fetch statistics (Admin)
             .service(logs::Logs)            // GET      /logs                   Fetch logs (Admin)
