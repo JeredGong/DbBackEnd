@@ -166,6 +166,7 @@ struct ModifyRequest {
 
 #[derive(serde::Deserialize)]
 struct PasswordRequest {
+    old_password_hash: String,
     pub password_hash: String
 }
 
@@ -432,9 +433,10 @@ pub async fn ModifyPasswd(
     let claims = CheckUser(&pool, &request).await?;
     
     sqlx::query!(
-        "UPDATE \"user\" SET password_hash = $1 WHERE id = $2",
+        "UPDATE \"user\" SET password_hash = $1 WHERE id = $2 AND password_hash = $3",
         &passwdReq.password_hash,
-        &claims.id
+        &claims.id,
+        &passwdReq.old_password_hash
     )
     .execute(pool.get_ref())
     .await
