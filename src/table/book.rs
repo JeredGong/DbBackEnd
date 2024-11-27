@@ -430,14 +430,9 @@ async fn GetBookById(
         actix_web::error::ErrorInternalServerError(format!("Failed to fetch book details.\nDatabase error: {}", err))
     })?;
 
-    // 如果没有找到书籍，返回404 Not Found
-    if book.id.is_none() {
-        return Ok(HttpResponse::NotFound().body("Book not found"));
-    }
-
     // 构建响应数据
     let bookResponse = BookResponse {
-        id: book.id.unwrap(),
+        id: book.id,
         title: book.title.unwrap_or_default(),
         author: book.author.unwrap_or_default(),
         bookType: book.book_type.unwrap_or_default(),
