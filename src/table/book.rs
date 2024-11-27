@@ -407,3 +407,47 @@ async fn UserRecords(
     RecordLog(claims.id, &pool, format!("Request for book self borrowed")).await?;
     Ok(HttpResponse::Ok().json(recordResponse))
 }
+#[get("/book/{id}")]
+async fn GetBookById(
+    pool: web::Data<PgPool>,      // 数据库连接池
+    bookID: web::Path<i64>,       // 路径参数：书籍ID
+    request: HttpRequest          // 请求对象，检查权限
+) -> Result<HttpResponse, Error> {
+
+    // 检查用户是否为管理员
+    let claims = CheckAdmin(&pool, &request).await?;
+
+    // 查询数据库获取书籍信息
+    let book = sqlx::query!(
+        "SELECT id, title, author, book_type, publish_date, available 
+        FROM book WHERE id = $1", 
+        *bookID
+    )
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to fetch book details.\nDatabase error: {}", err))
+    })?;
+
+    // 如果没有找到书籍，返回404 Not Found
+    if book.id.is_none() {
+        return Ok(HttpResponse::NotFound().body("Book not found"));
+    }
+
+    // 构建响应数据
+    let bookResponse = BookResponse {
+        id: book.id.unwrap(),
+        title: book.title.unwrap_or_default(),
+        author: book.author.unwrap_or_default(),
+        bookType: book.book_type.unwrap_or_default(),
+        publishDate: book.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+        available: book.available.unwrap_or(false),
+    };
+
+    // 记录日志
+    RecordLog(claims.id, &pool, format!("(Administrator) Fetch book details of ID {}", bookID)).await?;
+
+    // 返回书籍信息
+    Ok(HttpResponse::Ok().json(bookResponse))
+}
