@@ -23,11 +23,13 @@ async fn main() -> std::io::Result<()> {
             .wrap(Cors::permissive())   // Open CORS permission
             // .wrap(Cors::default().allowed_origin("http://localhost:52330"))
             .app_data(web::Data::new(pool.clone()))
+            .app_data(web::JsonConfig::default().limit(20 * 1024 * 1024))
             .route("/", web::get().to(index))
-            .service(user::Login)           // POST     /user/login             User login
             .service(user::Register)        // POST     /user/register          User Register (Admin)
             .service(user::GetInfo)         // GET      /user/info              Fetch user info
-            .service(user::GetImage)        // GET      /user/image             Fetch user image
+            .service(user::GetUserImage)    // GET      /user/image             Fetch user self image
+            .service(user::Login)           // POST     /user/login             User login
+            .service(user::GetImage)        // GET      /user/image             Fetch image of user by ID
             .service(user::ModifyImage)     // PUT      /user/image             Modify user image
             .service(user::ModifyPasswd)    // PUT      /user/password          Modify user password
             .service(user::ModifyEmail)     // PUT      /user/email             Modify user email

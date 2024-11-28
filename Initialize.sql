@@ -43,6 +43,9 @@ TABLESPACE pg_default;
 ALTER TABLE IF EXISTS public.user
     OWNER to postgres;
 
+INSERT INTO public.user(id, username, password_hash, role)
+	VALUES (0, 'guest', NULL, 0);
+
 INSERT INTO public.user(username, password_hash, role)
 	VALUES ('admin', 'admin', 0);
 
