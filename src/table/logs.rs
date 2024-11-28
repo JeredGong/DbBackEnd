@@ -39,7 +39,7 @@ pub async fn RecordLog(
 }
 
 #[get("/logs")]
-async fn Logs(
+pub async fn Logs(
     pool: web::Data<PgPool>,
     request: HttpRequest 
 ) -> Result<HttpResponse, Error> {
