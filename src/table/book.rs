@@ -63,7 +63,7 @@ struct RecordResponse {
 }
 
 #[post("/book")]
-async fn Add(
+pub async fn Add(
     pool: web::Data<PgPool>,
     bookReq: Json<BookRequest>,
     request: HttpRequest
@@ -97,7 +97,7 @@ async fn Add(
                 .await
                 .map_err(|err| {
                     println!("Database error: {:?}", err);
-                    actix_web::error::ErrorInternalServerError(format!("Failed to fetch book id.\nDatabase error: {}", err))
+                    actix_web::error::ErrorNotFound(format!("C\nDatabase error: {}", err))
                 })?;
     
     transaction.commit().await.map_err(|err| {
@@ -118,7 +118,7 @@ async fn Add(
 }
 
 #[get("/book/all")]
-async fn List(
+pub async fn List(
     pool: web::Data<PgPool>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error>  {
@@ -130,7 +130,7 @@ async fn List(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to retrieve books.\nDatabase error: {}", err))
+            actix_web::error::ErrorNotFound(format!("Failed to retrieve books.\nDatabase error: {}", err))
         })?;
 
     let bookResponse: Vec<BookResponse> = books
@@ -149,7 +149,7 @@ async fn List(
 }
 
 #[get("/book/search/{title}")]
-async fn Search(
+pub async fn Search(
     pool: web::Data<PgPool>,
     bookTitle: web::Path<String>,
     request: HttpRequest
@@ -193,7 +193,7 @@ async fn Search(
 }
 
 #[put("/book/{id}")]
-async fn Edit(
+pub async fn Edit(
     pool: web::Data<PgPool>,
     bookID: web::Path<i64>,
     bookReq: Json<BookRequest>,
@@ -222,7 +222,7 @@ async fn Edit(
 }
 
 #[delete("/book/{id}")]
-async fn Delete(
+pub async fn Delete(
     pool: web::Data<PgPool>,
     bookID: web::Path<i64>,
     request: HttpRequest
@@ -243,7 +243,7 @@ async fn Delete(
 }
 
 #[post("/book/borrow/{id}")]
-async fn Borrow(
+pub async fn Borrow(
     pool: web::Data<PgPool>,
     bookID: web::Path<i64>,
     request: HttpRequest
@@ -261,7 +261,7 @@ async fn Borrow(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to borrow book.\nDatabase error: {}", err))
+            actix_web::error::ErrorForbidden(format!("Failed to borrow book.\nDatabase error: {}", err))
         })?;
 
     sqlx::query!("UPDATE book SET available = false WHERE id = $1 and available = true", *bookID)
@@ -294,7 +294,7 @@ async fn Borrow(
 }
 
 #[post("/book/return/{id}")]
-async fn Return(
+pub async fn Return(
     pool: web::Data<PgPool>,
     bookID: web::Path<i64>,
     request: HttpRequest
@@ -315,7 +315,7 @@ async fn Return(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Valid borrowing record not found.\nDatabase error: {}", err))
+        actix_web::error::ErrorForbidden(format!("Valid borrowing record not found.\nDatabase error: {}", err))
     })?;
 
     sqlx::query!("UPDATE recs SET returned_at = NOW() WHERE returned_at IS NULL and user_id = $1 and book_id = $2",
@@ -347,7 +347,7 @@ async fn Return(
 }
 
 #[get("/book/borrowings/all")]
-async fn Records(
+pub async fn Records(
     pool: web::Data<PgPool>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
@@ -360,7 +360,7 @@ async fn Records(
             .await
             .map_err(|err| {
                 println!("Database error: {:?}", err);
-                actix_web::error::ErrorInternalServerError(format!("Failed to fetch borrowing records.\nDatabase error: {}", err))
+                actix_web::error::ErrorNotFound(format!("Failed to fetch borrowing records.\nDatabase error: {}", err))
             })?;
     
     let recordResponse: Vec<RecordResponse> = records
@@ -378,7 +378,7 @@ async fn Records(
 }
 
 #[get("/book/borrowings")]
-async fn UserRecords(
+pub async fn UserRecords(
     pool: web::Data<PgPool>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
@@ -391,7 +391,7 @@ async fn UserRecords(
             .await
             .map_err(|err| {
                 println!("Database error: {:?}", err);
-                actix_web::error::ErrorInternalServerError(format!("Failed to fetch borrowing records.\nDatabase error: {}", err))
+                actix_web::error::ErrorNotFound(format!("Failed to fetch borrowing records.\nDatabase error: {}", err))
             })?;
 
     let recordResponse: Vec<RecordResponse> = records
@@ -409,7 +409,7 @@ async fn UserRecords(
 }
 
 #[get("/book/{id}")]
-async fn GetBookById(
+pub async fn GetBookById(
     pool: web::Data<PgPool>,      // 数据库连接池
     bookID: web::Path<i64>,       // 路径参数：书籍ID
     request: HttpRequest          // 请求对象，检查权限
@@ -444,7 +444,7 @@ async fn GetBookById(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to fetch book details by ID.\nDatabase error: {}", err))
+        actix_web::error::ErrorNotFound(format!("Failed to fetch book details by ID.\nDatabase error: {}", err))
     })?;
 
     // 构建响应数据

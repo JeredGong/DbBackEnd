@@ -71,7 +71,7 @@ pub async fn UnwrapToken(
                             .await
                             .map_err(|err| {
                                 println!("Database error: {:?}", err);
-                                actix_web::error::ErrorUnauthorized(format!("User not found.\nDatabase error: {}", err))
+                                actix_web::error::ErrorNotFound(format!("User not found.\nDatabase error: {}", err))
                             })?;
                         if claims.role == role.role.unwrap_or_default() {
                             Ok(claims)
@@ -81,14 +81,14 @@ pub async fn UnwrapToken(
 
                     }, Err(err) => {
                         println!("Decode error: {:?}", err);
-                        Err(actix_web::error::ErrorUnauthorized(format!("Decode failed.\nDecode error: {}", err)))
+                        Err(actix_web::error::ErrorBadRequest(format!("Decode failed.\nDecode error: {}", err)))
                     }
                 };
             }
         }
     }
 
-    Err(actix_web::error::ErrorUnauthorized("Failed to fetch and parse token."))
+    Err(actix_web::error::ErrorBadRequest("Failed to fetch and parse token."))
 }
 
 pub fn CheckIs(
@@ -199,7 +199,7 @@ pub async fn Login(
             return Err(actix_web::error::ErrorUnauthorized("Invalid password."));
         }
     } else {
-        return Err(actix_web::error::ErrorUnauthorized("Password not found."));
+        return Err(actix_web::error::ErrorNotFound("Password not found."));
     }
 
     // Token expiration timestamp
@@ -267,7 +267,7 @@ pub async fn Register(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!("Insert failed.\nDatabase error: {}", err))
     })?;
 
     let user = sqlx::query!("SELECT id FROM \"user\" WHERE username = $1", &usersReq.username)
@@ -530,7 +530,7 @@ pub async fn Cancel(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!("Insert failed.\nDatabase error: {}", err))
         })?;
 
     RecordLog(claims.id, &pool, format!("Self cancelled")).await?;
@@ -551,7 +551,7 @@ pub async fn Delete(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!("Insert failed.\nDatabase error: {}", err))
         })?;
     
     RecordLog(claims.id, &pool, format!("(Administrator) Delete User fo ID {}", UserID)).await?;
@@ -607,7 +607,7 @@ pub async fn Upgrade(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!("Upgrade user failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!("Upgrade user failed.\nDatabase error: {}", err))
         })?;
 
     RecordLog(claims.id, &pool, format!("(Administrator) Upgrade user of ID {}", *userID)).await?;
@@ -632,7 +632,7 @@ pub async fn Dngrade(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!("Dngrade user failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!("Degrade user failed.\nDatabase error: {}", err))
         })?;
 
     RecordLog(claims.id, &pool, format!("(Administrator) Dngrade user of ID {}", *userID)).await?;
