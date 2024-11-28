@@ -88,7 +88,7 @@ struct DocumentResponse {
 }
 
 #[post("/docs")]
-async fn Add(
+pub async fn Add(
     pool: web::Data<PgPool>,
     docsReq: Json<DocumentRequest>,
     request: HttpRequest,
@@ -155,7 +155,7 @@ async fn Add(
 
 
 #[get("/docs/all")]
-async fn List(
+pub async fn List(
     pool: web::Data<PgPool>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
@@ -195,7 +195,7 @@ async fn List(
 }
 
 #[get("/docs/buffer")]
-async fn GetBuffer(
+pub async fn GetBuffer(
     pool: web::Data<PgPool>,
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
@@ -232,7 +232,7 @@ async fn GetBuffer(
 }
 
 #[get("/docs/buffer/{id}")]
-async fn DownloadBuffer(
+pub async fn DownloadBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
     request: HttpRequest,
@@ -262,7 +262,7 @@ async fn DownloadBuffer(
 
 
 #[put("/docs/buffer/{id}")]
-async fn EditBuffer(
+pub async fn EditBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
     docsReq: Json<DocumentRequest>,
@@ -301,7 +301,7 @@ async fn EditBuffer(
 
 
 #[post("/docs/buffer/{id}")]
-async fn ConfirmBuffer(
+pub async fn ConfirmBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
     request: HttpRequest,
@@ -363,7 +363,7 @@ async fn ConfirmBuffer(
 
 
 #[delete("/docs/buffer/{id}")]
-async fn RefuseBuffer(
+pub async fn RefuseBuffer(
     pool: web::Data<PgPool>,
     buffID: web::Path<i64>,
     request: HttpRequest,
@@ -387,7 +387,7 @@ async fn RefuseBuffer(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorNotFound(format!("Delete document failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!("Delete document failed.\nDatabase error: {}", err))
         })?;
 
     // 删除文件系统中的文件
@@ -405,7 +405,7 @@ async fn RefuseBuffer(
 
 
 #[get("/docs/search/{title}")]
-async fn Search(
+pub async fn Search(
     pool: web::Data<PgPool>,
     docsTitle: web::Path<String>,
     request: HttpRequest
@@ -447,7 +447,7 @@ async fn Search(
 }
 
 #[get("/docs/{id}")]
-async fn Download(
+pub async fn Download(
     pool: web::Data<PgPool>,
     docsID: web::Path<i64>,
     request: HttpRequest,
@@ -486,7 +486,7 @@ async fn Download(
 
 
 #[put("/docs/{id}")]
-async fn Edit(
+pub async fn Edit(
     pool: web::Data<PgPool>,
     docsID: web::Path<i64>,
     docsReq: Json<DocumentRequest>,

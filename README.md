@@ -53,3 +53,113 @@ GET      /book/borrowings        Fetch user borrowing records
 GET      /stat                   Fetch statistics (Admin)
 GET      /logs                   Fetch logs (Admin)
 ```
+## 错误说明
+### user
+```
+pub async fn UnwrapToken()
+  - 404   User not found
+  - 401   User role unmatched with database. Please re-login.
+  - 400   Decode failed.
+  - 400   Failed to fetch and parse token.
+pub fn CheckIs()
+  - 401   Role invalid.
+pub async fn CheckAdmin()
+  - 401   Only admins can perform this action.
+pub async fn CheckUser()
+  - 401   Only users can perform this action.
+pub async fn Login()
+  - 404   User not found.
+  - 401   Invalid password.
+  - 404   Password not found.
+  - 500   Failed to create Token.
+pub async fn Register()
+  - 500   Failed to start transaction.
+  - 500   Failed to create upload directory
+  - 500   Failed to save image
+  - 500   Insert failed.\nDatabase error:
+  - 500   Fetch user ID failed.
+  - 500   Failed to commit transaction.
+pub async fn GetInfo()
+  - 500   Insert failed.
+pub async fn GetImage()
+  - 500   Fetch image failed.
+pub async fn ModifyImage()
+  - 500   Failed to create upload directory
+  - 500   Failed to save image
+  - 500   Failed to update user image.
+pub async fn ModifyPasswd()
+  - 500   Failed to update user password.
+pub async fn ModifyEmail()
+  - 500   Failed to update user email.
+pub async fn ModifyUsername()
+  - 500   Failed to update user username.
+pub async fn Cancel()
+  - 500   Insert failed.
+pub async fn Delete()
+  - 500   Insert failed.
+pub async fn Users()
+  - 500   Search failed.
+pub async fn Upgrade()
+  - 500   Upgrade user failed.
+pub async fn Dngrade()
+  - 403   Administrators cannot self-dngrade.
+  - 500   Degrade user failed.
+pub async fn GetImageFile()
+  - 400   Invalid image path
+  - 404   Image not found
+  - 500   Failed to read image file
+```
+### stat
+```
+pub async fn Statistics()
+  - 500   Failed to start transaction.
+  - 500   Failed to get books borrowed count.
+  - 500   Failed to get documents downloaded count.
+  - 500   Failed to commit transaction.
+```
+### logs
+```
+pub async fn RecordLog()
+  - 500   Failed to insert log.
+pub async fn Logs()
+  - 500   Failed to fetch logs.
+```
+### docs
+```
+pub async fn Add()
+  - 500   Failed to save PDF file
+  - 500   Failed to insert into docs table
+  - 500   Failed to insert into buff table
+  - 500   Failed to record log
+pub async fn List()
+  - 500   Failed to retrieve documents.
+pub async fn GetBuffer()
+  - 500   Failed to retrieve documents.
+pub async fn DownloadBuffer()
+  - 404   Document not found
+  - 500   Failed to read PDF file
+pub async fn EditBuffer()
+  - 500   Failed to save PDF file
+  - 500   Failed to edit buffer document
+pub async fn ConfirmBuffer()
+  - 500   Failed to start transaction.
+  - 404   Document not found in buffer.
+  - 500   Failed to insert document into docs table.
+  - 500   Failed to delete document from buffer.
+  - 500   Failed to commit transaction.
+pub async fn RefuseBuffer()
+  - 404   Document not found in buffer.
+  - 500   Delete document failed.
+  - 500   Failed to delete document file from storage
+pub async fn Search()
+  - 500   Failed to retrieve documents.
+  - 404   Document not found.
+pub async fn Download()
+  - 404   Document not found.
+  - 500   Failed to read PDF file
+  - 500   Failed to update download count.
+pub async fn Edit()
+  - 500   Failed to save PDF file
+  - 500   Failed to edit document.
+async fn Delete()
+  - 500   Failed to delete document.
