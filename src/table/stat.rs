@@ -1,6 +1,6 @@
 use actix_web::{get, web::{self}, HttpRequest, HttpResponse, Error};
 use sqlx::PgPool;
-use super::user::CheckUser;
+use super::user::UnwrapToken;
 use super::logs::RecordLog;
 
 #[derive(serde::Serialize)]
@@ -15,7 +15,10 @@ pub async fn Statistics(
     request: HttpRequest
 ) -> Result<HttpResponse, Error> {
 
-    let claims = CheckUser(&pool, &request).await?;
+    let userID: i64 = match UnwrapToken(&pool, &request).await {
+        Ok(claims) => claims.id,
+        Err(_) => 0
+    };
 
     let mut transaction = pool.begin().await.map_err(|err| {
         println!("Database error: {:?}", err);
@@ -50,6 +53,6 @@ pub async fn Statistics(
         actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
     })?;
 
-    RecordLog(claims.id, &pool, format!("Request for Statistics")).await?;
+    RecordLog(userID, &pool, format!("{} Request for Statistics", if userID == 0 {"(Guest)"} else {""})).await?;
     Ok(HttpResponse::Ok().json(statisticsResponse))
 }
