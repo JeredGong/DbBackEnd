@@ -431,7 +431,7 @@ pub async fn ModifyImage(
 
     // Delete image file (PHYSICAL)
     if !old_file_path.is_empty() {
-        tokio::fs::remove_file(&file_path).await.map_err(|err| {
+        tokio::fs::remove_file(&old_file_path).await.map_err(|err| {
             println!("File delete error: {:?}", err);
             actix_web::error::ErrorInternalServerError("Failed to delete document file from storage")
         })?;
