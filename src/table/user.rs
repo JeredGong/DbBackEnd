@@ -305,11 +305,15 @@ pub async fn GetInfo(
         actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
     })?;
 
-    let file_path = user.image.unwrap_or_default();
-    let image_file = tokio::fs::read(&file_path).await.map_err(|err| {
-        println!("Image read error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to read image file")
-    })?;
+    let mut image_file = Vec::default();
+
+    if user.image != None {
+        let file_path = user.image.unwrap_or_default();
+        image_file = tokio::fs::read(&file_path).await.map_err(|err| {
+            println!("Image read error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to read image file")
+        })?;
+    }
 
     let userResponse: UsersResponse = UsersResponse {
         id: user.id,
