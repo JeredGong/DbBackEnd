@@ -163,3 +163,38 @@ pub async fn Edit()
   - 500   Failed to edit document.
 async fn Delete()
   - 500   Failed to delete document.
+```
+### book
+```
+pub async fn Add()
+  - 500   Failed to start transaction.
+  - 500   Failed to add book.
+  - 404   Failed to add book.
+  - 500   Failed to commit transaction.
+pub async fn List()
+  - 404   Failed to retrieve books.
+pub async fn Search()
+  - 500   Failed to retrieve books.
+pub async fn Edit()
+  - 500   Failed to edit book.
+pub async fn Delete()
+  - 500   Failed to delete book.
+pub async fn Borrow()
+  - 500   Failed to start transaction.
+  - 403   Failed to borrow book.
+  - 500   Failed to borrow book.
+  - 500   Failed to insert borrowing record.
+  - 500   Failed to commit transaction.
+pub async fn Return()
+  - 500   Failed to start transaction.
+  - 403   Valid borrowing record not found.
+  - 500   Failed to update borrowing record
+  - 500   Failed to insert borrowing record.
+  - 500   Failed to commit transaction.
+pub async fn Records()
+  - 404   Failed to fetch borrowing records.
+pub async fn UserRecords()
+  - 404   Failed to fetch borrowing records.
+pub async fn GetBookById()
+  - 404   Failed to fetch book details by ID.
+```
