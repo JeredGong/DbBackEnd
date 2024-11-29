@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
  *          file_path       text,
  *          uploaded_by     bigint,
  *          download_count  integer,
- *          upload_date     timestamp with time zone,
+ *          upload_time     timestamp with time zone,
  *          doc_type        character varying(128),
  *          author          character varying(128),
  *          publish_date    timestamp with time zone
@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
  *          file_path       text,
  *          uploaded_by     bigint,
  *          download_count  integer,
- *          upload_date     timestamp with time zone,
+ *          upload_time     timestamp with time zone,
  *          doc_type        character varying(128),
  *          author          character varying(128),
  *          publish_date    timestamp with time zone       

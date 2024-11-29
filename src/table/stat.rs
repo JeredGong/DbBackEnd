@@ -5,8 +5,9 @@ use super::logs::RecordLog;
 
 #[derive(serde::Serialize)]
 struct StatisticsResponse {
-    countBook: i64,
-    countDocs: i64
+    uploadDocs: i64,
+    dnloadBook: i64,
+    dnloadDocs: i64
 }
 
 #[get("/stat")]
@@ -24,34 +25,45 @@ pub async fn Statistics(
         println!("Database error: {:?}", err);
         actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
     })?;
+
+    let uploadDocs = sqlx::query!("
+        SELECT COUNT(*) AS count
+        FROM docs
+        WHERE upload_time >= NOW() - INTERVAL '30 days';"
+    )
+    .fetch_one(&mut transaction)
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to get count of upload documents.\nDatabase error: {}", err))
+    })?;
     
-    let countBook = 
-        sqlx::query!("SELECT COUNT(id) FROM recs")
-            .fetch_one(&mut transaction)
-            .await
-            .map_err(|err| {
-                println!("Database error: {:?}", err);
-                actix_web::error::ErrorInternalServerError(format!("Failed to get books borrowed count.\nDatabase error: {}", err))
-            })?;
+    let dnloadBook = sqlx::query!("SELECT COUNT(id) AS count FROM recs")
+    .fetch_one(&mut transaction)
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to get books borrowed count.\nDatabase error: {}", err))
+    })?;
 
-    let countDocs = 
-        sqlx::query!("SELECT SUM(download_count) FROM docs")
-            .fetch_one(&mut transaction)
-            .await
-            .map_err(|err| {
-                println!("Database error: {:?}", err);
-                actix_web::error::ErrorInternalServerError(format!("Failed to get documents downloaded count.\nDatabase error: {}", err))
-            })?; 
-
-    let statisticsResponse = StatisticsResponse {
-        countBook: countBook.count.unwrap_or_default(),
-        countDocs: countDocs.sum.unwrap_or_default()
-    };
+    let dnloadDocs = sqlx::query!("SELECT SUM(download_count) AS count FROM docs")
+    .fetch_one(&mut transaction)
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to get documents downloaded count.\nDatabase error: {}", err))
+    })?; 
 
     transaction.commit().await.map_err(|err| {
         println!("Transaction error: {:?}", err);
         actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
     })?;
+
+    let statisticsResponse = StatisticsResponse {
+        uploadDocs: uploadDocs.count.unwrap_or_default(),
+        dnloadBook: if userID == 0 {0} else {dnloadBook.count.unwrap_or_default()},
+        dnloadDocs: if userID == 0 {0} else {dnloadDocs.count.unwrap_or_default()}
+    };
 
     RecordLog(userID, &pool, format!("{} Request for Statistics", if userID == 0 {"(Guest)"} else {""})).await?;
     Ok(HttpResponse::Ok().json(statisticsResponse))
