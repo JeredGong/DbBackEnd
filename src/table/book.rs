@@ -386,7 +386,7 @@ pub async fn UserRecords(
     let claims = CheckUser(&pool, &request).await?;
 
     let records = 
-        sqlx::query!("SELECT id, user_id, book_id, borrowed_at, returned_at FROM recs WHERE user_id = $1", claims.id)
+        sqlx::query!("SELECT id, user_id, book_id, borrowed_at, returned_at FROM recs WHERE user_id = $1 AND returned_at IS NULL", claims.id)
             .fetch_all(pool.get_ref())
             .await
             .map_err(|err| {

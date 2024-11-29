@@ -19,3 +19,10 @@ chrono = "0.4"
 time = { version = "0.3", features = ["serde"] }
 env_logger = "0.10"
 tokio = { version = "1", features = ["full"] }
+
+[profile.release]
+lto = true
+panic = "abort"
+
+[build]
+target = "x86_64-pc-windows-gnu"
