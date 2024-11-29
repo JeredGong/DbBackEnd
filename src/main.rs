@@ -14,6 +14,7 @@ async fn index() -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
     let databaseURL = std::env::var("DATABASE_URL").expect("Database URL undefined.");
+    let backendADDR = std::env::var("BACKEND_ADDR").expect("Backend Address undefined.");
     let pool = PgPool::connect(&databaseURL).await.unwrap();
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));    // Enable logger
 
@@ -64,7 +65,7 @@ async fn main() -> std::io::Result<()> {
             .service(stat::Statistics)      // GET      /stat                   Fetch statistics (Admin)
             .service(logs::Logs)            // GET      /logs                   Fetch logs (Admin)
     })
-    .bind("localhost:9876")?
+    .bind(&backendADDR)?
     .run()
     .await
 }
