@@ -6,7 +6,7 @@ use super::logs::RecordLog;
 #[derive(serde::Serialize)]
 struct StatisticsResponse {
     uploadDocs: i64,
-    dnloadBook: i64,
+    borrowBook: i64,
     dnloadDocs: i64
 }
 
@@ -38,7 +38,7 @@ pub async fn Statistics(
         actix_web::error::ErrorInternalServerError(format!("Failed to get count of upload documents.\nDatabase error: {}", err))
     })?;
     
-    let dnloadBook = sqlx::query!("SELECT COUNT(id) AS count FROM recs")
+    let borrowBook = sqlx::query!("SELECT COUNT(id) AS count FROM recs")
     .fetch_one(&mut transaction)
     .await
     .map_err(|err| {
@@ -61,7 +61,7 @@ pub async fn Statistics(
 
     let statisticsResponse = StatisticsResponse {
         uploadDocs: uploadDocs.count.unwrap_or_default(),
-        dnloadBook: if userID == 0 {0} else {dnloadBook.count.unwrap_or_default()},
+        borrowBook: if userID == 0 {0} else {borrowBook.count.unwrap_or_default()},
         dnloadDocs: if userID == 0 {0} else {dnloadDocs.count.unwrap_or_default()}
     };
 
