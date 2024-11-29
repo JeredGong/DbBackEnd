@@ -27,6 +27,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .service(user::Register)        // POST     /user/register          User Register (Admin)
             .service(user::GetInfo)         // GET      /user/info              Fetch user info
+            .service(user::GetInfoByID)     // GET      /user/info/{id}         Fetch user info by ID (Admin)
             .service(user::GetUserImage)    // GET      /user/image             Fetch user self image
             .service(user::Login)           // POST     /user/login             User login
             .service(user::GetImage)        // GET      /user/image             Fetch image of user by ID
