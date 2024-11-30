@@ -1,14 +1,18 @@
-use actix_web::{delete, get, post, put, web::{self, Json}, Error, HttpRequest, HttpResponse};
+use super::docs::save_file;
+use super::logs::RecordLog;
+use actix_web::{
+    delete, get, post, put,
+    web::{self, Json},
+    Error, HttpRequest, HttpResponse,
+};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use sqlx::PgPool;
-use super::logs::RecordLog;
 use serde::Deserialize; // 确保引入了 serde::Deserialize
-use super::docs::save_file;
+use sqlx::PgPool;
 
 /*
- *  PostgreSQL schema 
- * 
+ *  PostgreSQL schema
+ *
  *      user(
  *          id              bigint PRIMARY KEY SERIAL,
  *          username        character varying(256),
@@ -22,7 +26,7 @@ use super::docs::save_file;
 #[derive(PartialEq)]
 pub enum Role {
     Admin,
-    User
+    User,
 }
 
 impl Role {
@@ -30,7 +34,7 @@ impl Role {
         match value {
             0 => Some(Role::Admin),
             1 => Some(Role::User),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -39,17 +43,11 @@ impl Role {
 pub struct Claims {
     pub id: i64,
     pub role: i16,
-    pub exp: u64
+    pub exp: u64,
 }
 
-pub async fn UnwrapToken(
-    pool: &PgPool,
-    request: &HttpRequest
-) -> Result<Claims, Error> {
-
-    let key = 
-        std::env::var("ENCODING_KEY")
-            .unwrap_or_default();
+pub async fn UnwrapToken(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
+    let key = std::env::var("ENCODING_KEY").unwrap_or_default();
 
     let validation = Validation::default();
 
@@ -59,43 +57,59 @@ pub async fn UnwrapToken(
             if let Some(token) = authorString.strip_prefix("Bearer ") {
                 return match decode::<Claims>(
                     token,
-                    &DecodingKey::from_secret(key.as_ref()), 
-                    &validation
+                    &DecodingKey::from_secret(key.as_ref()),
+                    &validation,
                 ) {
                     Ok(data) => {
-                        
                         let claims: Claims = data.claims;
-                        let role = 
+                        let role =
                             sqlx::query!("SELECT role FROM \"user\" WHERE id = $1", &claims.id)
-                            .fetch_one(pool)
-                            .await
-                            .map_err(|err| {
-                                println!("Database error: {:?}", err);
-                                actix_web::error::ErrorNotFound(format!("User not found.\nDatabase error: {}", err))
-                            })?;
+                                .fetch_one(pool)
+                                .await
+                                .map_err(|err| {
+                                    println!("Database error: {:?}", err);
+                                    actix_web::error::ErrorNotFound(format!(
+                                        "User not found.\nDatabase error: {}",
+                                        err
+                                    ))
+                                })?;
                         if claims.role == role.role.unwrap_or_default() {
                             Ok(claims)
                         } else {
-                            Err(actix_web::error::ErrorUnauthorized("User role unmatched with database. Please re-login."))
+                            Err(actix_web::error::ErrorUnauthorized(
+                                "User role unmatched with database. Please re-login.",
+                            ))
                         }
-
-                    }, Err(err) => {
+                    }
+                    Err(err) => {
                         println!("Decode error: {:?}", err);
-                        Err(actix_web::error::ErrorBadRequest(format!("Decode failed.\nDecode error: {}", err)))
+                        Err(actix_web::error::ErrorBadRequest(format!(
+                            "Decode failed.\nDecode error: {}",
+                            err
+                        )))
                     }
                 };
             }
         }
     }
 
-    Err(actix_web::error::ErrorBadRequest("Failed to fetch and parse token."))
+    Err(actix_web::error::ErrorBadRequest(
+        "Failed to fetch and parse token.",
+    ))
 }
 
-pub fn CheckIs(
-    claims: &Claims,
-    roleCheck: Role
-) -> Result<bool, Error> {
 
+pub async fn CheckAdmin(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
+    let claims = UnwrapToken(pool, request).await?;
+    if !CheckIs(&claims, Role::Admin)? {
+        return Err(actix_web::error::ErrorUnauthorized(
+            "Only admins can perform this action.",
+        ));
+    }
+    Ok(claims)
+}
+
+pub fn CheckIs(claims: &Claims, roleCheck: Role) -> Result<bool, Error> {
     match Role::toRole(claims.role) {
         Some(role) => {
             if role == roleCheck {
@@ -103,33 +117,16 @@ pub fn CheckIs(
             } else {
                 Ok(false)
             }
-        },
-        _ => {
-            Err(actix_web::error::ErrorUnauthorized("Role invalid."))
         }
+        _ => Err(actix_web::error::ErrorUnauthorized("Role invalid.")),
     }
 }
 
-pub async fn CheckAdmin(
-    pool: &PgPool,
-    request: &HttpRequest
-) -> Result<Claims, Error> {
-    let claims = UnwrapToken(pool, request).await?;
-    if !CheckIs(&claims, Role::Admin)? {
-        return Err(actix_web::error::ErrorUnauthorized("Only admins can perform this action."));
-    }
-    Ok(claims)
-}
+pub async fn CheckUser(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
+    let claims = UnwrapToken(pool, &request)
+        .await
+        .map_err(|_| actix_web::error::ErrorUnauthorized("Only users can perform this action."))?;
 
-pub async fn CheckUser(
-    pool: &PgPool, 
-    request: &HttpRequest
-) -> Result<Claims, Error> {
-    let claims = UnwrapToken(pool, &request).await
-        .map_err(|_| {
-            actix_web::error::ErrorUnauthorized("Only users can perform this action.")
-        })?;
-    
     Ok(claims)
 }
 
@@ -145,7 +142,7 @@ struct UsersRequest {
     password_hash: String,
     email: String,
     role: i16,
-    image: Vec<u8> // 使用 Vec<u8> 存储二进制图像数据
+    image: Vec<u8>, // 使用 Vec<u8> 存储二进制图像数据
 }
 
 #[derive(serde::Serialize)]
@@ -154,44 +151,46 @@ struct UsersResponse {
     username: String,
     email: String,
     role: i16,
-    image: Vec<u8>
+    image: Vec<u8>,
 }
 
 #[derive(serde::Deserialize)]
 struct ModifyRequest {
-    image: Vec<u8>
+    image: Vec<u8>,
 }
 
 #[derive(serde::Deserialize)]
 struct PasswordRequest {
     old_password_hash: String,
-    password_hash: String
+    password_hash: String,
 }
 
 #[derive(serde::Deserialize)]
 struct EmailRequest {
-    email: String
+    email: String,
 }
 
 #[derive(Deserialize)]
 struct UsernameRequest {
-    username: String
+    username: String,
 }
 
 #[post("/user/login")]
 pub async fn Login(
     pool: web::Data<PgPool>,
-    usersReq: Json<LoginRequest>
+    usersReq: Json<LoginRequest>,
 ) -> Result<HttpResponse, Error> {
-
     // Get user infomation from database
-    let user = sqlx::query!("SELECT id, username, password_hash, role FROM \"user\" WHERE username = $1", &usersReq.username)
-        .fetch_one(pool.get_ref())
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorNotFound(format!("User not found.\nDatabase error: {}", err))
-        })?;
+    let user = sqlx::query!(
+        "SELECT id, username, password_hash, role FROM \"user\" WHERE username = $1",
+        &usersReq.username
+    )
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorNotFound(format!("User not found.\nDatabase error: {}", err))
+    })?;
 
     // Check whether password hash is valid
     if let Some(stored_hash) = user.password_hash {
@@ -210,25 +209,26 @@ pub async fn Login(
 
     let claims: Claims = Claims {
         id: user.id,
-        role: user.role.unwrap_or_default() as i16, 
-        exp: expiration
+        role: user.role.unwrap_or_default() as i16,
+        exp: expiration,
     };
 
-    let key = 
-        std::env::var("ENCODING_KEY")
-            .unwrap_or_default();
+    let key = std::env::var("ENCODING_KEY").unwrap_or_default();
 
     // Calculate token (HS256 algorithm)
-    let token = 
-        encode(
-            &Header::default(), 
-            &claims, 
-            &EncodingKey::from_secret(key.as_ref())
-        ).map_err(|err| {
-            println!("JWT token error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to create Token.\nDatabase error: {}", err))
-        })?;
-    
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(key.as_ref()),
+    )
+    .map_err(|err| {
+        println!("JWT token error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to create Token.\nDatabase error: {}",
+            err
+        ))
+    })?;
+
     RecordLog(user.id, &pool, format!("User Login")).await?;
     Ok(HttpResponse::Ok().body(token))
 }
@@ -243,15 +243,18 @@ pub async fn Register(
     let claims = CheckAdmin(&pool, &request).await?;
 
     let file_path = save_file(&usersReq.image, "./uploads/avatar", "png")
-    .await
-    .map_err(|err| {
-        println!("File save error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to save image file")
-    })?;
+        .await
+        .map_err(|err| {
+            println!("File save error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to save image file")
+        })?;
 
     let mut transaction = pool.begin().await.map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to start transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     // 插入新用户
@@ -270,7 +273,10 @@ pub async fn Register(
         actix_web::error::ErrorInternalServerError(format!("Insert failed.\nDatabase error: {}", err))
     })?;
 
-    let user = sqlx::query!("SELECT id FROM \"user\" WHERE username = $1", &usersReq.username)
+    let user = sqlx::query!(
+        "SELECT id FROM \"user\" WHERE username = $1",
+        &usersReq.username
+    )
     .fetch_one(&mut transaction)
     .await
     .map_err(|err| {
@@ -280,24 +286,31 @@ pub async fn Register(
 
     transaction.commit().await.map_err(|err| {
         println!("Transaction error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to commit transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     // 记录日志
-    RecordLog(claims.id, &pool, format!("(Administrator) Registered user with ID {}", user.id)).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Administrator) Registered user with ID {}", user.id),
+    )
+    .await?;
 
     Ok(HttpResponse::Ok().body("Register success."))
 }
 
 #[get("/user/info")]
-pub async fn GetInfo(
-    pool: web::Data<PgPool>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
+pub async fn GetInfo(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
     let claims = CheckUser(&pool, &request).await?;
-    
-    let user = sqlx::query!("SELECT id, username, email, role, image FROM \"user\" WHERE id = $1", &claims.id)
+
+    let user = sqlx::query!(
+        "SELECT id, username, email, role, image FROM \"user\" WHERE id = $1",
+        &claims.id
+    )
     .fetch_one(pool.get_ref())
     .await
     .map_err(|err| {
@@ -320,67 +333,30 @@ pub async fn GetInfo(
         username: user.username.unwrap_or_default(),
         email: user.email.unwrap_or_default(),
         role: user.role.unwrap_or_default(),
-        image: image_file
+        image: image_file,
     };
 
     RecordLog(claims.id, &pool, format!("Fetch user information")).await?;
     Ok(HttpResponse::Ok().json(userResponse))
 }
 
-#[get("/user/info/{id}")]
-pub async fn GetInfoByID(
-    pool: web::Data<PgPool>,
-    userID: web::Path<i64>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
-    let claims = CheckAdmin(&pool, &request).await?;
-    
-    let user = sqlx::query!("SELECT id, username, email, role, image FROM \"user\" WHERE id = $1", *userID)
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
-    })?;
-
-    let mut image_file = Vec::default();
-
-    if user.image != None {
-        let file_path = user.image.unwrap_or_default();
-        image_file = tokio::fs::read(&file_path).await.map_err(|err| {
-            println!("Image read error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to read image file")
-        })?;
-    }
-
-    let userResponse: UsersResponse = UsersResponse {
-        id: user.id,
-        username: user.username.unwrap_or_default(),
-        email: user.email.unwrap_or_default(),
-        role: user.role.unwrap_or_default(),
-        image: image_file
-    };
-
-    RecordLog(claims.id, &pool, format!("Fetch user information of ID {}", *userID)).await?;
-    Ok(HttpResponse::Ok().json(userResponse))
-}
-
 #[get("/user/image")]
 pub async fn GetUserImage(
     pool: web::Data<PgPool>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckUser(&pool, &request).await?;
-    
+
     let image = sqlx::query!("SELECT image FROM \"user\" WHERE id = $1", claims.id)
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorForbidden(format!("Fetch image failed.\nDatabase error: {}", err))
-    })?;
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorForbidden(format!(
+                "Fetch image failed.\nDatabase error: {}",
+                err
+            ))
+        })?;
 
     let file_path = image.image.unwrap_or_default();
     let image_file = tokio::fs::read(&file_path).await.map_err(|err| {
@@ -389,28 +365,78 @@ pub async fn GetUserImage(
     })?;
 
     RecordLog(claims.id, &pool, format!("Fetch self image")).await?;
-    Ok(HttpResponse::Ok().content_type("application/png").body(image_file))
+    Ok(HttpResponse::Ok()
+        .content_type("application/png")
+        .body(image_file))
+}
+
+#[get("/user/info/{id}")]
+pub async fn GetInfoByID(
+    pool: web::Data<PgPool>,
+    userID: web::Path<i64>,
+    request: HttpRequest,
+) -> Result<HttpResponse, Error> {
+    let claims = CheckAdmin(&pool, &request).await?;
+
+    let user = sqlx::query!(
+        "SELECT id, username, email, role, image FROM \"user\" WHERE id = $1",
+        *userID
+    )
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+    })?;
+
+    let mut image_file = Vec::default();
+
+    if user.image != None {
+        let file_path = user.image.unwrap_or_default();
+        image_file = tokio::fs::read(&file_path).await.map_err(|err| {
+            println!("Image read error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to read image file")
+        })?;
+    }
+
+    let userResponse: UsersResponse = UsersResponse {
+        id: user.id,
+        username: user.username.unwrap_or_default(),
+        email: user.email.unwrap_or_default(),
+        role: user.role.unwrap_or_default(),
+        image: image_file,
+    };
+
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("Fetch user information of ID {}", *userID),
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(userResponse))
 }
 
 #[get("/user/image/{id}")]
 pub async fn GetImage(
     pool: web::Data<PgPool>,
     userID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let selfID: i64 = match UnwrapToken(&pool, &request).await {
         Ok(claims) => claims.id,
-        Err(_) => 0
+        Err(_) => 0,
     };
-    
+
     let image = sqlx::query!("SELECT image FROM \"user\" WHERE id = $1", *userID)
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorForbidden(format!("Fetch image failed.\nDatabase error: {}", err))
-    })?;
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorForbidden(format!(
+                "Fetch image failed.\nDatabase error: {}",
+                err
+            ))
+        })?;
 
     let file_path = image.image.unwrap_or_default();
     let image_file = tokio::fs::read(&file_path).await.map_err(|err| {
@@ -418,8 +444,15 @@ pub async fn GetImage(
         actix_web::error::ErrorInternalServerError("Failed to read image file")
     })?;
 
-    RecordLog(selfID, &pool, format!("Fetch image of user of ID {}", userID)).await?;
-    Ok(HttpResponse::Ok().content_type("application/png").body(image_file))
+    RecordLog(
+        selfID,
+        &pool,
+        format!("Fetch image of user of ID {}", userID),
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .content_type("application/png")
+        .body(image_file))
 }
 
 #[put("/user/image")]
@@ -432,18 +465,22 @@ pub async fn ModifyImage(
     let claims = CheckUser(&pool, &request).await?;
 
     let file_path = save_file(&imageReq.image, "./uploads/avatar", "png")
-    .await
-    .map_err(|err| {
-        println!("File save error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to save image file")
-    })?;
+        .await
+        .map_err(|err| {
+            println!("File save error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to save image file")
+        })?;
 
     let mut transaction = pool.begin().await.map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to start transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
-    let old_file_path = sqlx::query!("
+    let old_file_path = sqlx::query!(
+        "
         SELECT image FROM \"user\" WHERE id = $1",
         &claims.id
     )
@@ -451,8 +488,13 @@ pub async fn ModifyImage(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to fetch old user image path.\nDatabase error: {}", err))
-    })?.image.unwrap_or_default();
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to fetch old user image path.\nDatabase error: {}",
+            err
+        ))
+    })?
+    .image
+    .unwrap_or_default();
 
     // 更新用户的图像路径到数据库
     sqlx::query!(
@@ -464,20 +506,30 @@ pub async fn ModifyImage(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to update user image.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to update user image.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     transaction.commit().await.map_err(|err| {
         println!("Transaction error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to commit transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     // Delete image file (PHYSICAL)
     if !old_file_path.is_empty() {
-        tokio::fs::remove_file(&old_file_path).await.map_err(|err| {
-            println!("File delete error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to delete document file from storage")
-        })?;
+        tokio::fs::remove_file(&old_file_path)
+            .await
+            .map_err(|err| {
+                println!("File delete error: {:?}", err);
+                actix_web::error::ErrorInternalServerError(
+                    "Failed to delete document file from storage",
+                )
+            })?;
     }
 
     RecordLog(claims.id, &pool, "Modify image".to_string()).await?;
@@ -488,11 +540,10 @@ pub async fn ModifyImage(
 pub async fn ModifyPasswd(
     pool: web::Data<PgPool>,
     passwdReq: Json<PasswordRequest>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckUser(&pool, &request).await?;
-    
+
     sqlx::query!(
         "UPDATE \"user\" SET password_hash = $1 WHERE id = $2 AND password_hash = $3",
         &passwdReq.password_hash,
@@ -503,7 +554,10 @@ pub async fn ModifyPasswd(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to update user password.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to update user password.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     RecordLog(claims.id, &pool, format!("Modify password")).await?;
@@ -514,11 +568,10 @@ pub async fn ModifyPasswd(
 pub async fn ModifyEmail(
     pool: web::Data<PgPool>,
     emailReq: Json<EmailRequest>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckUser(&pool, &request).await?;
-    
+
     sqlx::query!(
         "UPDATE \"user\" SET email = $1 WHERE id = $2",
         &emailReq.email,
@@ -528,7 +581,10 @@ pub async fn ModifyEmail(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to update user email.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to update user email.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     RecordLog(claims.id, &pool, format!("Modify email")).await?;
@@ -539,11 +595,10 @@ pub async fn ModifyEmail(
 pub async fn ModifyUsername(
     pool: web::Data<PgPool>,
     usernameReq: Json<UsernameRequest>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckUser(&pool, &request).await?;
-    
+
     sqlx::query!(
         "UPDATE \"user\" SET username = $1 WHERE id = $2",
         &usernameReq.username,
@@ -553,7 +608,10 @@ pub async fn ModifyUsername(
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to update user username.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to update user username.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     RecordLog(claims.id, &pool, format!("Modify username")).await?;
@@ -561,11 +619,7 @@ pub async fn ModifyUsername(
 }
 
 #[delete("/user/cancel")]
-pub async fn Cancel(
-    pool: web::Data<PgPool>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
+pub async fn Cancel(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
     let claims = CheckUser(&pool, &request).await?;
 
     sqlx::query!("UPDATE \"user\" SET username = NULL, password_hash = NULL, email = NULL, role = NULL, image = NULL WHERE id = $1", claims.id)
@@ -584,9 +638,8 @@ pub async fn Cancel(
 pub async fn Delete(
     pool: web::Data<PgPool>,
     UserID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-    
     let claims = CheckAdmin(&pool, &request).await?;
 
     sqlx::query!("UPDATE \"user\" SET username = NULL, password_hash = NULL, email = NULL, role = NULL, image = NULL WHERE id = $1", *UserID)
@@ -596,31 +649,36 @@ pub async fn Delete(
             println!("Database error: {:?}", err);
             actix_web::error::ErrorInternalServerError(format!("Insert failed.\nDatabase error: {}", err))
         })?;
-    
-    RecordLog(claims.id, &pool, format!("(Administrator) Delete User fo ID {}", UserID)).await?;
+
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Administrator) Delete User fo ID {}", UserID),
+    )
+    .await?;
     Ok(HttpResponse::Ok().body("Delete account success."))
 }
 
 #[get("/user/all")]
-pub async fn Users(
-    pool: web::Data<PgPool>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
+pub async fn Users(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
     let claims = CheckAdmin(&pool, &request).await?;
 
     let mut transaction = pool.begin().await.map(|t| t).map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to start transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
-    let users = sqlx::query!("SELECT id, username, email, role FROM \"user\" WHERE username IS NOT NULL")
-    .fetch_all(&mut transaction)
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
-    })?;
+    let users =
+        sqlx::query!("SELECT id, username, email, role FROM \"user\" WHERE username IS NOT NULL")
+            .fetch_all(&mut transaction)
+            .await
+            .map_err(|err| {
+                println!("Database error: {:?}", err);
+                actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+            })?;
 
     let usersResponse: Vec<UsersResponse> = users
         .into_iter()
@@ -629,10 +687,16 @@ pub async fn Users(
             username: user.username.unwrap_or_default(),
             role: user.role.unwrap_or_default(),
             image: Vec::default(),
-            email: user.email.unwrap_or_default()
-        }).collect();
+            email: user.email.unwrap_or_default(),
+        })
+        .collect();
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Request for user list")).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Administrator) Request for user list"),
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(usersResponse))
 }
 
@@ -640,9 +704,8 @@ pub async fn Users(
 pub async fn Upgrade(
     pool: web::Data<PgPool>,
     userID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
     sqlx::query!("UPDATE \"user\" SET role = $1 WHERE id = $2", 0, *userID)
@@ -650,10 +713,18 @@ pub async fn Upgrade(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Upgrade user failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!(
+                "Upgrade user failed.\nDatabase error: {}",
+                err
+            ))
         })?;
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Upgrade user of ID {}", *userID)).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Administrator) Upgrade user of ID {}", *userID),
+    )
+    .await?;
     Ok(HttpResponse::Ok().body("Upgrade user successfully."))
 }
 
@@ -661,13 +732,14 @@ pub async fn Upgrade(
 pub async fn Dngrade(
     pool: web::Data<PgPool>,
     userID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
     if claims.id == *userID {
-        return Err(actix_web::error::ErrorForbidden("Administrators cannot self-dngrade."));
+        return Err(actix_web::error::ErrorForbidden(
+            "Administrators cannot self-dngrade.",
+        ));
     }
 
     sqlx::query!("UPDATE \"user\" SET role = $1 WHERE id = $2", 1, *userID)
@@ -675,10 +747,17 @@ pub async fn Dngrade(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Degrade user failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!(
+                "Degrade user failed.\nDatabase error: {}",
+                err
+            ))
         })?;
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Dngrade user of ID {}", *userID)).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Administrator) Dngrade user of ID {}", *userID),
+    )
+    .await?;
     Ok(HttpResponse::Ok().body("Dngrade user successfully."))
 }
-
