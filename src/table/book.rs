@@ -386,7 +386,7 @@ pub async fn UserRecords(
     let claims = CheckUser(&pool, &request).await?;
 
     let records = 
-        sqlx::query!("SELECT id, user_id, book_id, borrowed_at, returned_at FROM recs WHERE user_id = $1", claims.id)
+        sqlx::query!("SELECT id, user_id, book_id, borrowed_at, returned_at FROM recs WHERE user_id = $1 AND returned_at IS NULL", claims.id)
             .fetch_all(pool.get_ref())
             .await
             .map_err(|err| {
@@ -420,24 +420,23 @@ pub async fn GetBookById(
 
     let book = sqlx::query!("
         SELECT
-            id_list,
-            title,
-            author,
-            book_type,
-            publish_date,
-            remain
+            ARRAY_AGG(id) AS id_list,
+            find.title,
+            find.author,
+            find.book_type,
+            find.publish_date,
+            COUNT(*) AS remain
         FROM 
-            (SELECT
-                ARRAY_AGG(id) AS id_list,
+           (SELECT
                 title,
                 author,
                 book_type,
-                publish_date,
-                COUNT(*) AS remain
+                publish_date
             FROM book
-            WHERE id = $1 AND available = true
-            GROUP BY title, author, book_type, publish_date) AS sames
-        WHERE title = sames.title AND author = sames.author AND book_type = sames.book_type AND publish_date = sames.publish_date",
+            WHERE id = $1) AS 
+            find JOIN book 
+                ON find.title = book.title AND find.author = book.author AND find.book_type = book.book_type AND find.publish_date = book.publish_date
+        GROUP BY find.title, find.author, find.book_type, find.publish_date",
         *bookID
     )
     .fetch_one(pool.get_ref())

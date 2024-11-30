@@ -21,6 +21,7 @@ async fn index() -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
     let databaseURL = std::env::var("DATABASE_URL").expect("Database URL undefined.");
+    let backendADDR = std::env::var("BACKEND_ADDR").expect("Backend Address undefined.");
     let pool = PgPool::connect(&databaseURL).await.unwrap();
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info")); // Enable logger
 
@@ -30,6 +31,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Cors::permissive()) // Open CORS permission
             // .wrap(Cors::default().allowed_origin("http://localhost:52330"))
             .app_data(web::Data::new(pool.clone()))
+            .app_data(web::JsonConfig::default().limit(20 * 1024 * 1024))
             .route("/", web::get().to(index))
             .service(user::Register)        // POST     /user/register          User Register (Admin)
             .service(user::GetInfo)         // GET      /user/info              Fetch user info
@@ -70,7 +72,7 @@ async fn main() -> std::io::Result<()> {
             .service(stat::Statistics)      // GET      /stat                   Fetch statistics (Admin)
             .service(logs::Logs)            // GET      /logs                   Fetch logs (Admin)
     })
-    .bind("localhost:9876")?
+    .bind(&backendADDR)?
     .run()
     .await
 }
