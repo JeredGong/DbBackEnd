@@ -4,6 +4,7 @@
 
 - .env
   - 一些为了安全性而选择不加入代码的敏感数据, 包含 `DATABASE_URL` 和 `ENCODING_KEY`.
+  - 后端的连接端口为`BACKEND_ADDR`,默认值是本地端口9876
 
 - DBbackend.postman_collection.json
   - 后端全部接口测试文件. 可直接导入 postman.
