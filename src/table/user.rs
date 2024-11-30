@@ -327,6 +327,45 @@ pub async fn GetInfo(
     Ok(HttpResponse::Ok().json(userResponse))
 }
 
+#[get("/user/info/{id}")]
+pub async fn GetInfoByID(
+    pool: web::Data<PgPool>,
+    userID: web::Path<i64>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+
+    let claims = CheckAdmin(&pool, &request).await?;
+    
+    let user = sqlx::query!("SELECT id, username, email, role, image FROM \"user\" WHERE id = $1", *userID)
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+    })?;
+
+    let mut image_file = Vec::default();
+
+    if user.image != None {
+        let file_path = user.image.unwrap_or_default();
+        image_file = tokio::fs::read(&file_path).await.map_err(|err| {
+            println!("Image read error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to read image file")
+        })?;
+    }
+
+    let userResponse: UsersResponse = UsersResponse {
+        id: user.id,
+        username: user.username.unwrap_or_default(),
+        email: user.email.unwrap_or_default(),
+        role: user.role.unwrap_or_default(),
+        image: image_file
+    };
+
+    RecordLog(claims.id, &pool, format!("Fetch user information of ID {}", *userID)).await?;
+    Ok(HttpResponse::Ok().json(userResponse))
+}
+
 #[get("/user/image")]
 pub async fn GetUserImage(
     pool: web::Data<PgPool>,

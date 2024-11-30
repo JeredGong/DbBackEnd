@@ -29,7 +29,7 @@ pub async fn Statistics(
     let uploadDocs = sqlx::query!("
         SELECT COUNT(*) AS count
         FROM docs
-        WHERE upload_time >= NOW() - INTERVAL '30 days';"
+        WHERE upload_time >= NOW() - INTERVAL '30 days'"
     )
     .fetch_one(&mut transaction)
     .await

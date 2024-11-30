@@ -14,6 +14,7 @@ async fn index() -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
     let databaseURL = std::env::var("DATABASE_URL").expect("Database URL undefined.");
+    let backendADDR = std::env::var("BACKEND_ADDR").expect("Backend Address undefined.");
     let pool = PgPool::connect(&databaseURL).await.unwrap();
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));    // Enable logger
 
@@ -27,6 +28,7 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .service(user::Register)        // POST     /user/register          User Register (Admin)
             .service(user::GetInfo)         // GET      /user/info              Fetch user info
+            .service(user::GetInfoByID)     // GET      /user/info/{id}         Fetch user info by ID (Admin)
             .service(user::GetUserImage)    // GET      /user/image             Fetch user self image
             .service(user::Login)           // POST     /user/login             User login
             .service(user::GetImage)        // GET      /user/image             Fetch image of user by ID
@@ -58,12 +60,12 @@ async fn main() -> std::io::Result<()> {
             .service(book::Borrow)          // POST     /book/borrow/{id}       Borrow a book
             .service(book::Return)          // POST     /book/return/{id}       Return a book
             .service(book::Records)         // GET      /book/borrowings/all    Fetch all borrowing records (Admin)
-            .service(book::GetBookById)     // GET      /book/{id}              Fetch book information by ID
             .service(book::UserRecords)     // GET      /book/borrowings        Fetch user borrowing records
+            .service(book::GetBookById)     // GET      /book/{id}              Fetch book information by ID
             .service(stat::Statistics)      // GET      /stat                   Fetch statistics (Admin)
             .service(logs::Logs)            // GET      /logs                   Fetch logs (Admin)
     })
-    .bind("localhost:9876")?
+    .bind(&backendADDR)?
     .run()
     .await
 }
