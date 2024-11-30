@@ -1,9 +1,16 @@
 #![allow(non_snake_case)]
 
 use actix_cors::Cors;
-use actix_web::{middleware::Logger, web::{self}, App, HttpResponse, HttpServer};
+use actix_web::{
+    middleware::Logger,
+    web::{self},
+    App, HttpResponse, HttpServer,
+};
 use sqlx::PgPool;
-use table::{book::{self}, docs, logs, stat, user};
+use table::{
+    book::{self},
+    docs, logs, stat, user,
+};
 pub mod table;
 
 async fn index() -> HttpResponse {
@@ -16,12 +23,12 @@ async fn main() -> std::io::Result<()> {
     let databaseURL = std::env::var("DATABASE_URL").expect("Database URL undefined.");
     let backendADDR = std::env::var("BACKEND_ADDR").expect("Backend Address undefined.");
     let pool = PgPool::connect(&databaseURL).await.unwrap();
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));    // Enable logger
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info")); // Enable logger
 
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .wrap(Cors::permissive())   // Open CORS permission
+            .wrap(Cors::permissive()) // Open CORS permission
             // .wrap(Cors::default().allowed_origin("http://localhost:52330"))
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::JsonConfig::default().limit(20 * 1024 * 1024))
