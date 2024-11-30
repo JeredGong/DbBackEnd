@@ -98,6 +98,17 @@ pub async fn UnwrapToken(pool: &PgPool, request: &HttpRequest) -> Result<Claims,
     ))
 }
 
+
+pub async fn CheckAdmin(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
+    let claims = UnwrapToken(pool, request).await?;
+    if !CheckIs(&claims, Role::Admin)? {
+        return Err(actix_web::error::ErrorUnauthorized(
+            "Only admins can perform this action.",
+        ));
+    }
+    Ok(claims)
+}
+
 pub fn CheckIs(claims: &Claims, roleCheck: Role) -> Result<bool, Error> {
     match Role::toRole(claims.role) {
         Some(role) => {
@@ -109,16 +120,6 @@ pub fn CheckIs(claims: &Claims, roleCheck: Role) -> Result<bool, Error> {
         }
         _ => Err(actix_web::error::ErrorUnauthorized("Role invalid.")),
     }
-}
-
-pub async fn CheckAdmin(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
-    let claims = UnwrapToken(pool, request).await?;
-    if !CheckIs(&claims, Role::Admin)? {
-        return Err(actix_web::error::ErrorUnauthorized(
-            "Only admins can perform this action.",
-        ));
-    }
-    Ok(claims)
 }
 
 pub async fn CheckUser(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
@@ -339,6 +340,36 @@ pub async fn GetInfo(pool: web::Data<PgPool>, request: HttpRequest) -> Result<Ht
     Ok(HttpResponse::Ok().json(userResponse))
 }
 
+#[get("/user/image")]
+pub async fn GetUserImage(
+    pool: web::Data<PgPool>,
+    request: HttpRequest,
+) -> Result<HttpResponse, Error> {
+    let claims = CheckUser(&pool, &request).await?;
+
+    let image = sqlx::query!("SELECT image FROM \"user\" WHERE id = $1", claims.id)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorForbidden(format!(
+                "Fetch image failed.\nDatabase error: {}",
+                err
+            ))
+        })?;
+
+    let file_path = image.image.unwrap_or_default();
+    let image_file = tokio::fs::read(&file_path).await.map_err(|err| {
+        println!("Image read error: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to read image file")
+    })?;
+
+    RecordLog(claims.id, &pool, format!("Fetch self image")).await?;
+    Ok(HttpResponse::Ok()
+        .content_type("application/png")
+        .body(image_file))
+}
+
 #[get("/user/info/{id}")]
 pub async fn GetInfoByID(
     pool: web::Data<PgPool>,
@@ -383,36 +414,6 @@ pub async fn GetInfoByID(
     )
     .await?;
     Ok(HttpResponse::Ok().json(userResponse))
-}
-
-#[get("/user/image")]
-pub async fn GetUserImage(
-    pool: web::Data<PgPool>,
-    request: HttpRequest,
-) -> Result<HttpResponse, Error> {
-    let claims = CheckUser(&pool, &request).await?;
-
-    let image = sqlx::query!("SELECT image FROM \"user\" WHERE id = $1", claims.id)
-        .fetch_one(pool.get_ref())
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!(
-                "Fetch image failed.\nDatabase error: {}",
-                err
-            ))
-        })?;
-
-    let file_path = image.image.unwrap_or_default();
-    let image_file = tokio::fs::read(&file_path).await.map_err(|err| {
-        println!("Image read error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to read image file")
-    })?;
-
-    RecordLog(claims.id, &pool, format!("Fetch self image")).await?;
-    Ok(HttpResponse::Ok()
-        .content_type("application/png")
-        .body(image_file))
 }
 
 #[get("/user/image/{id}")]
