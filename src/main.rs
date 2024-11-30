@@ -1,9 +1,16 @@
 #![allow(non_snake_case)]
 
 use actix_cors::Cors;
-use actix_web::{middleware::Logger, web::{self}, App, HttpResponse, HttpServer};
+use actix_web::{
+    middleware::Logger,
+    web::{self},
+    App, HttpResponse, HttpServer,
+};
 use sqlx::PgPool;
-use table::{book::{self}, docs, logs, stat, user};
+use table::{
+    book::{self},
+    docs, logs, stat, user,
+};
 pub mod table;
 
 async fn index() -> HttpResponse {
@@ -15,19 +22,21 @@ async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
     let databaseURL = std::env::var("DATABASE_URL").expect("Database URL undefined.");
     let pool = PgPool::connect(&databaseURL).await.unwrap();
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));    // Enable logger
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info")); // Enable logger
 
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .wrap(Cors::permissive())   // Open CORS permission
+            .wrap(Cors::permissive()) // Open CORS permission
             // .wrap(Cors::default().allowed_origin("http://localhost:52330"))
             .app_data(web::Data::new(pool.clone()))
             .route("/", web::get().to(index))
-            .service(user::Login)           // POST     /user/login             User login
             .service(user::Register)        // POST     /user/register          User Register (Admin)
             .service(user::GetInfo)         // GET      /user/info              Fetch user info
-            .service(user::GetImage)        // GET      /user/image             Fetch user image
+            .service(user::GetInfoByID)     // GET      /user/info/{id}         Fetch user info by ID (Admin)
+            .service(user::GetUserImage)    // GET      /user/image             Fetch user self image
+            .service(user::Login)           // POST     /user/login             User login
+            .service(user::GetImage)        // GET      /user/image             Fetch image of user by ID
             .service(user::ModifyImage)     // PUT      /user/image             Modify user image
             .service(user::ModifyPasswd)    // PUT      /user/password          Modify user password
             .service(user::ModifyEmail)     // PUT      /user/email             Modify user email
@@ -56,8 +65,8 @@ async fn main() -> std::io::Result<()> {
             .service(book::Borrow)          // POST     /book/borrow/{id}       Borrow a book
             .service(book::Return)          // POST     /book/return/{id}       Return a book
             .service(book::Records)         // GET      /book/borrowings/all    Fetch all borrowing records (Admin)
-            .service(book::GetBookById)     // GET      /book/{id}              Fetch book information by ID
             .service(book::UserRecords)     // GET      /book/borrowings        Fetch user borrowing records
+            .service(book::GetBookById)     // GET      /book/{id}              Fetch book information by ID
             .service(stat::Statistics)      // GET      /stat                   Fetch statistics (Admin)
             .service(logs::Logs)            // GET      /logs                   Fetch logs (Admin)
     })
