@@ -117,6 +117,35 @@ pub async fn Add(
     Ok(HttpResponse::Ok().body("Book added successfully."))
 }
 
+#[put("/book/{id}")]
+pub async fn Edit(
+    pool: web::Data<PgPool>,
+    bookID: web::Path<i64>,
+    bookReq: Json<BookRequest>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+
+    let claims = CheckAdmin(&pool, &request).await?;
+
+    sqlx::query!(
+        "UPDATE book SET title = $1, author = $2, book_type = $3, publish_date = $4 WHERE id = $5",
+        &bookReq.title,
+        &bookReq.author,
+        &bookReq.bookType,
+        &bookReq.publishDate,
+        *bookID
+    )
+    .execute(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to edit book.\nDatabase error: {}", err))
+    })?;
+
+    RecordLog(claims.id, &pool, format!("(Administrator) Edit book of ID {}", bookID)).await?;
+    Ok(HttpResponse::Ok().body("Book updated successfully."))
+}
+
 #[get("/book/all")]
 pub async fn List(
     pool: web::Data<PgPool>,
@@ -192,35 +221,6 @@ pub async fn Search(
     Ok(HttpResponse::Ok().json(searchResponse))
 }
 
-#[put("/book/{id}")]
-pub async fn Edit(
-    pool: web::Data<PgPool>,
-    bookID: web::Path<i64>,
-    bookReq: Json<BookRequest>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
-    let claims = CheckAdmin(&pool, &request).await?;
-
-    sqlx::query!(
-        "UPDATE book SET title = $1, author = $2, book_type = $3, publish_date = $4 WHERE id = $5",
-        &bookReq.title,
-        &bookReq.author,
-        &bookReq.bookType,
-        &bookReq.publishDate,
-        *bookID
-    )
-    .execute(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to edit book.\nDatabase error: {}", err))
-    })?;
-
-    RecordLog(claims.id, &pool, format!("(Administrator) Edit book of ID {}", bookID)).await?;
-    Ok(HttpResponse::Ok().body("Book updated successfully."))
-}
-
 #[delete("/book/{id}")]
 pub async fn Delete(
     pool: web::Data<PgPool>,
@@ -240,57 +240,6 @@ pub async fn Delete(
 
     RecordLog(claims.id, &pool, format!("(Administrator) Delete book of ID {}", bookID)).await?;
     Ok(HttpResponse::Ok().body("Book deleted successfully."))
-}
-
-#[post("/book/borrow/{id}")]
-pub async fn Borrow(
-    pool: web::Data<PgPool>,
-    bookID: web::Path<i64>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
-    let claims = CheckUser(&pool, &request).await?;
-
-    let mut transaction = pool.begin().await.map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
-    })?;
-
-    sqlx::query!("SELECT id FROM book WHERE id = $1 and available = true", *bookID)
-        .fetch_one(&mut transaction)
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!("Failed to borrow book.\nDatabase error: {}", err))
-        })?;
-
-    sqlx::query!("UPDATE book SET available = false WHERE id = $1 and available = true", *bookID)
-        .execute(&mut transaction)
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to borrow book.\nDatabase error: {}", err))
-        })?;
-
-    sqlx::query!("INSERT INTO recs (user_id, book_id, borrowed_at, returned_at) 
-        VALUES ($1, $2, NOW(), NULL)", 
-        &claims.id,
-        *bookID
-    )
-    .execute(&mut transaction)
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to insert borrowing record.\nDatabase error: {}", err))
-    })?;
-    
-    transaction.commit().await.map_err(|err| {
-        println!("Transaction error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
-    })?;
-
-    RecordLog(claims.id, &pool, format!("Borrow book of ID {}", bookID)).await?;
-    Ok(HttpResponse::Ok().body("Book borrowed successfully."))
 }
 
 #[post("/book/return/{id}")]
@@ -346,6 +295,57 @@ pub async fn Return(
     Ok(HttpResponse::Ok().body("Book returned successfully."))
 }
 
+#[post("/book/borrow/{id}")]
+pub async fn Borrow(
+    pool: web::Data<PgPool>,
+    bookID: web::Path<i64>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+
+    let claims = CheckUser(&pool, &request).await?;
+
+    let mut transaction = pool.begin().await.map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
+    })?;
+
+    sqlx::query!("SELECT id FROM book WHERE id = $1 and available = true", *bookID)
+        .fetch_one(&mut transaction)
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorForbidden(format!("Failed to borrow book.\nDatabase error: {}", err))
+        })?;
+
+    sqlx::query!("UPDATE book SET available = false WHERE id = $1 and available = true", *bookID)
+        .execute(&mut transaction)
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorInternalServerError(format!("Failed to borrow book.\nDatabase error: {}", err))
+        })?;
+
+    sqlx::query!("INSERT INTO recs (user_id, book_id, borrowed_at, returned_at) 
+        VALUES ($1, $2, NOW(), NULL)", 
+        &claims.id,
+        *bookID
+    )
+    .execute(&mut transaction)
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to insert borrowing record.\nDatabase error: {}", err))
+    })?;
+    
+    transaction.commit().await.map_err(|err| {
+        println!("Transaction error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
+    })?;
+
+    RecordLog(claims.id, &pool, format!("Borrow book of ID {}", bookID)).await?;
+    Ok(HttpResponse::Ok().body("Book borrowed successfully."))
+}
+
 #[get("/book/borrowings/all")]
 pub async fn Records(
     pool: web::Data<PgPool>,
@@ -374,37 +374,6 @@ pub async fn Records(
         }).collect();
     
     RecordLog(claims.id, &pool, format!("(Administrator) Request for all borrowing records")).await?;
-    Ok(HttpResponse::Ok().json(recordResponse))
-}
-
-#[get("/book/borrowings")]
-pub async fn UserRecords(
-    pool: web::Data<PgPool>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
-    let claims = CheckUser(&pool, &request).await?;
-
-    let records = 
-        sqlx::query!("SELECT id, user_id, book_id, borrowed_at, returned_at FROM recs WHERE user_id = $1 AND returned_at IS NULL", claims.id)
-            .fetch_all(pool.get_ref())
-            .await
-            .map_err(|err| {
-                println!("Database error: {:?}", err);
-                actix_web::error::ErrorNotFound(format!("Failed to fetch borrowing records.\nDatabase error: {}", err))
-            })?;
-
-    let recordResponse: Vec<RecordResponse> = records
-        .into_iter()
-        .map(|rec| RecordResponse {
-            id: rec.id,
-            userID: rec.user_id,
-            bookID: rec.book_id,
-            borrowedAt: rec.borrowed_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
-            returnedAt: rec.returned_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap())
-        }).collect();
-    
-    RecordLog(claims.id, &pool, format!("Request for book self borrowed")).await?;
     Ok(HttpResponse::Ok().json(recordResponse))
 }
 
@@ -461,4 +430,35 @@ pub async fn GetBookById(
 
     // 返回书籍信息
     Ok(HttpResponse::Ok().json(bookResponse))
+}
+
+#[get("/book/borrowings")]
+pub async fn UserRecords(
+    pool: web::Data<PgPool>,
+    request: HttpRequest
+) -> Result<HttpResponse, Error> {
+
+    let claims = CheckUser(&pool, &request).await?;
+
+    let records = 
+        sqlx::query!("SELECT id, user_id, book_id, borrowed_at, returned_at FROM recs WHERE user_id = $1 AND returned_at IS NULL", claims.id)
+            .fetch_all(pool.get_ref())
+            .await
+            .map_err(|err| {
+                println!("Database error: {:?}", err);
+                actix_web::error::ErrorNotFound(format!("Failed to fetch borrowing records.\nDatabase error: {}", err))
+            })?;
+
+    let recordResponse: Vec<RecordResponse> = records
+        .into_iter()
+        .map(|rec| RecordResponse {
+            id: rec.id,
+            userID: rec.user_id,
+            bookID: rec.book_id,
+            borrowedAt: rec.borrowed_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
+            returnedAt: rec.returned_at.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap())
+        }).collect();
+    
+    RecordLog(claims.id, &pool, format!("Request for book self borrowed")).await?;
+    Ok(HttpResponse::Ok().json(recordResponse))
 }

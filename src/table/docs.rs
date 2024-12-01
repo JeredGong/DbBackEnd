@@ -1,16 +1,20 @@
-use actix_web::{delete, get, post, put, web::{self, Json}, HttpRequest, HttpResponse, Error};
-use time::{Date, Month, OffsetDateTime, UtcOffset};
-use sqlx::PgPool;
-use super::user::{CheckAdmin, CheckUser, Role, UnwrapToken};
 use super::logs::RecordLog;
+use super::user::{CheckAdmin, CheckUser, Role, UnwrapToken};
+use actix_web::{
+    delete, get, post, put,
+    web::{self, Json},
+    Error, HttpRequest, HttpResponse,
+};
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use time::{Date, Month, OffsetDateTime, UtcOffset};
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 // use base64::{engine::general_purpose, Engine}; // 引入 Engine 模块
 /*
- *  PostgreSQL schema 
- * 
+ *  PostgreSQL schema
+ *
  *      docs(
  *          id              bigint PRIMARY KEY,
  *          title           character varying(256),
@@ -22,7 +26,7 @@ use serde::{Deserialize, Serialize};
  *          author          character varying(128),
  *          publish_date    timestamp with time zone
  *      )
- * 
+ *
  *      buff(
  *          id              bigint PRIMARY KEY,
  *          title           character varying(256),
@@ -32,45 +36,20 @@ use serde::{Deserialize, Serialize};
  *          upload_time     timestamp with time zone,
  *          doc_type        character varying(128),
  *          author          character varying(128),
- *          publish_date    timestamp with time zone       
+ *          publish_date    timestamp with time zone
  *      )
  */
 
-// 保存文件并返回路径
-pub async fn save_file(content: &Vec<u8>, upload_dir: &str, file_type: &str) -> Result<String, std::io::Error> {
-    // 确保上传目录存在
-    fs::create_dir_all(upload_dir).await?;
-
-    // 生成唯一文件名
-    let file_name = format!("{}.{}", Uuid::new_v4(), file_type);
-    let file_path = format!("{}/{}", upload_dir, file_name);
-
-    // 将内容写入文件
-    let mut file = File::create(&file_path).await?;
-    file.write_all(content).await?;
-
-    Ok(file_path)
-}
-
-// fn base64_to_vec<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-// where
-//     D: serde::Deserializer<'de>,
-// {
-//     let base64_str = String::deserialize(deserializer)?; // 获取 Base64 字符串
-//     general_purpose::STANDARD
-//         .decode(&base64_str) // 使用新的 Engine API
-//         .map_err(serde::de::Error::custom) // 解码错误处理
-// }
 
 #[derive(Serialize, Deserialize)]
 struct DocumentRequest {
     title: String,
     author: String,
     docType: String,
-    // #[serde(deserialize_with = "base64_to_vec")] 
+    // #[serde(deserialize_with = "base64_to_vec")]
     // 取消 pdfContent base64_to_vec Trait
     pdfContent: Vec<u8>,
-    publishDate: Date
+    publishDate: Date,
 }
 
 #[derive(serde::Serialize)]
@@ -82,7 +61,7 @@ struct DocumentResponse {
     docType: String,
     publishDate: Date,
     upload_date: OffsetDateTime,
-    download_count: i32
+    download_count: i32,
 }
 
 #[post("/docs")]
@@ -139,7 +118,11 @@ pub async fn Add(
         })?;
     }
 
-    RecordLog(claims.id, &pool, format!("Upload document '{}'", docsReq.title))
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("Upload document '{}'", docsReq.title),
+    )
     .await
     .map_err(|err| {
         println!("Log record error: {:?}", err);
@@ -149,52 +132,11 @@ pub async fn Add(
     Ok(HttpResponse::Ok().body("Document uploaded successfully."))
 }
 
-#[get("/docs/all")]
-pub async fn List(
-    pool: web::Data<PgPool>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
-    let userID: i64 = match UnwrapToken(&pool, &request).await {
-        Ok(claims) => claims.id,
-        Err(_) => 0
-    };
-
-    let documents = sqlx::query!("
-        SELECT docs.id, docs.title, docs.author, \"user\".username AS uploaded_by, docs.doc_type, docs.publish_date, docs.upload_time, docs.download_count
-        FROM docs
-        JOIN \"user\" ON \"user\".id = docs.uploaded_by"
-    )
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
-    })?;
-
-    let docsResponse: Vec<DocumentResponse> = documents
-        .into_iter()
-        .map(|doc| DocumentResponse {
-            id: doc.id,
-            title: doc.title.unwrap_or_default(),
-            author: doc.author.unwrap_or_default(),
-            uploadedBy: doc.uploaded_by.unwrap_or_default(),
-            docType: doc.doc_type.unwrap_or_default(),
-            publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
-            upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
-            download_count: doc.download_count.unwrap_or(0),
-        }).collect();
-
-    RecordLog(userID, &pool, format!("{} Request for document list", if userID == 0 {"(Guest)"} else {""})).await?;
-    Ok(HttpResponse::Ok().json(docsResponse))
-}
-
 #[get("/docs/buffer")]
 pub async fn GetBuffer(
     pool: web::Data<PgPool>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
     let documents = sqlx::query!("
@@ -217,12 +159,73 @@ pub async fn GetBuffer(
             author: doc.author.unwrap_or_default(),
             uploadedBy: doc.uploaded_by.unwrap_or_default(),
             docType: doc.doc_type.unwrap_or_default(),
-            publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
-            upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
+            publishDate: doc
+                .publish_date
+                .unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc
+                .upload_time
+                .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+                .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
             download_count: doc.download_count.unwrap_or(0),
-        }).collect();
+        })
+        .collect();
 
-    RecordLog(claims.id, &pool, format!("(Admininstrator) Request for documents in buffer")).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Admininstrator) Request for documents in buffer"),
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(docsResponse))
+}
+
+#[get("/docs/all")]
+pub async fn List(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
+    let userID: i64 = match UnwrapToken(&pool, &request).await {
+        Ok(claims) => claims.id,
+        Err(_) => 0,
+    };
+
+    let documents = sqlx::query!("
+        SELECT docs.id, docs.title, docs.author, \"user\".username AS uploaded_by, docs.doc_type, docs.publish_date, docs.upload_time, docs.download_count
+        FROM docs
+        JOIN \"user\" ON \"user\".id = docs.uploaded_by"
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
+    })?;
+
+    let docsResponse: Vec<DocumentResponse> = documents
+        .into_iter()
+        .map(|doc| DocumentResponse {
+            id: doc.id,
+            title: doc.title.unwrap_or_default(),
+            author: doc.author.unwrap_or_default(),
+            uploadedBy: doc.uploaded_by.unwrap_or_default(),
+            docType: doc.doc_type.unwrap_or_default(),
+            publishDate: doc
+                .publish_date
+                .unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc
+                .upload_time
+                .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+                .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
+            download_count: doc.download_count.unwrap_or(0),
+        })
+        .collect();
+
+    RecordLog(
+        userID,
+        &pool,
+        format!(
+            "{} Request for document list",
+            if userID == 0 { "(Guest)" } else { "" }
+        ),
+    )
+    .await?;
     Ok(HttpResponse::Ok().json(docsResponse))
 }
 
@@ -251,8 +254,15 @@ pub async fn DownloadBuffer(
         actix_web::error::ErrorInternalServerError("Failed to read PDF file")
     })?;
 
-    RecordLog(claims.id, &pool, format!("Download buffer document ID {}", buffID)).await?;
-    Ok(HttpResponse::Ok().content_type("application/pdf").body(pdf_content))
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("Download buffer document ID {}", buffID),
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .content_type("application/pdf")
+        .body(pdf_content))
 }
 
 #[put("/docs/buffer/{id}")]
@@ -266,11 +276,11 @@ pub async fn EditBuffer(
 
     // 保存新的文件内容
     let new_file_path = save_file(&docsReq.pdfContent, "./uploads/docs", "pdf")
-    .await
-    .map_err(|err| {
-        println!("File save error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to save PDF file")
-    })?;
+        .await
+        .map_err(|err| {
+            println!("File save error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to save PDF file")
+        })?;
 
     // 更新数据库记录
     sqlx::query!(
@@ -289,8 +299,68 @@ pub async fn EditBuffer(
         actix_web::error::ErrorInternalServerError("Failed to edit buffer document")
     })?;
 
-    RecordLog(claims.id, &pool, format!("Edit buffer document ID {}", buffID)).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("Edit buffer document ID {}", buffID),
+    )
+    .await?;
     Ok(HttpResponse::Ok().body("Buffer document updated successfully."))
+}
+
+#[get("/docs/search/{title}")]
+pub async fn Search(
+    pool: web::Data<PgPool>,
+    docsTitle: web::Path<String>,
+    request: HttpRequest,
+) -> Result<HttpResponse, Error> {
+    let userID: i64 = match UnwrapToken(&pool, &request).await {
+        Ok(claims) => claims.id,
+        Err(_) => 0,
+    };
+
+    let documents = sqlx::query!("
+        SELECT docs.id, title, author, \"user\".username AS uploaded_by, doc_type, publish_date, upload_time, download_count 
+        FROM docs JOIN \"user\" ON \"user\".id = docs.uploaded_by
+        WHERE title LIKE $1",
+        format!("%{}%", *docsTitle)
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
+    })?;
+
+    let docsResponse: Vec<DocumentResponse> = documents
+        .into_iter()
+        .map(|doc| DocumentResponse {
+            id: doc.id,
+            title: doc.title.unwrap_or_default(),
+            author: doc.author.unwrap_or_default(),
+            uploadedBy: doc.uploaded_by.unwrap_or_default(),
+            docType: doc.doc_type.unwrap_or_default(),
+            publishDate: doc
+                .publish_date
+                .unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc
+                .upload_time
+                .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+                .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
+            download_count: doc.download_count.unwrap_or(0),
+        })
+        .collect();
+
+    RecordLog(
+        userID,
+        &pool,
+        format!(
+            "{} Request for document list",
+            if userID == 0 { "(Guest)" } else { "" }
+        ),
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(docsResponse))
 }
 
 #[post("/docs/buffer/{id}")]
@@ -303,7 +373,10 @@ pub async fn ConfirmBuffer(
 
     let mut transaction = pool.begin().await.map(|t| t).map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to start transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     // 查询缓冲区文档
@@ -344,15 +417,26 @@ pub async fn ConfirmBuffer(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Failed to delete document from buffer.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!(
+                "Failed to delete document from buffer.\nDatabase error: {}",
+                err
+            ))
         })?;
 
     transaction.commit().await.map(|_| ()).map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to commit transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
-    RecordLog(claims.id, &pool, format!("Confirm buffer document ID {}", buffID)).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("Confirm buffer document ID {}", buffID),
+    )
+    .await?;
     Ok(HttpResponse::Ok().body("Buffer document confirmed successfully."))
 }
 
@@ -370,7 +454,10 @@ pub async fn RefuseBuffer(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorNotFound(format!("Document not found in buffer.\nDatabase error: {}", err))
+            actix_web::error::ErrorNotFound(format!(
+                "Document not found in buffer.\nDatabase error: {}",
+                err
+            ))
         })?;
 
     let file_path = document.file_path.unwrap_or_default();
@@ -381,61 +468,32 @@ pub async fn RefuseBuffer(
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!("Delete document failed.\nDatabase error: {}", err))
+            actix_web::error::ErrorInternalServerError(format!(
+                "Delete document failed.\nDatabase error: {}",
+                err
+            ))
         })?;
 
     // 删除文件系统中的文件
     if !file_path.is_empty() {
         tokio::fs::remove_file(&file_path).await.map_err(|err| {
             println!("File delete error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to delete document file from storage")
+            actix_web::error::ErrorInternalServerError(
+                "Failed to delete document file from storage",
+            )
         })?;
     }
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Refuse document in buffer of ID {}", *buffID)).await?;
-    Ok(HttpResponse::Ok().body("Refuse document successfully."))
-}
-
-#[get("/docs/search/{title}")]
-pub async fn Search(
-    pool: web::Data<PgPool>,
-    docsTitle: web::Path<String>,
-    request: HttpRequest
-) -> Result<HttpResponse, Error> {
-
-    let userID: i64 = match UnwrapToken(&pool, &request).await {
-        Ok(claims) => claims.id,
-        Err(_) => 0
-    };
-
-    let documents = sqlx::query!("
-        SELECT docs.id, title, author, \"user\".username AS uploaded_by, doc_type, publish_date, upload_time, download_count 
-        FROM docs JOIN \"user\" ON \"user\".id = docs.uploaded_by
-        WHERE title LIKE $1",
-        format!("%{}%", *docsTitle)
+    RecordLog(
+        claims.id,
+        &pool,
+        format!(
+            "(Administrator) Refuse document in buffer of ID {}",
+            *buffID
+        ),
     )
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
-    })?;
-
-    let docsResponse: Vec<DocumentResponse> = documents
-        .into_iter()
-        .map(|doc| DocumentResponse {
-            id: doc.id,
-            title: doc.title.unwrap_or_default(),
-            author: doc.author.unwrap_or_default(),
-            uploadedBy: doc.uploaded_by.unwrap_or_default(),
-            docType: doc.doc_type.unwrap_or_default(),
-            publishDate: doc.publish_date.unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
-            upload_date: doc.upload_time.unwrap_or(OffsetDateTime::UNIX_EPOCH).to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()), 
-            download_count: doc.download_count.unwrap_or(0),
-        }).collect();
-
-    RecordLog(userID, &pool, format!("{} Request for document list", if userID == 0 {"(Guest)"} else {""})).await?;
-    Ok(HttpResponse::Ok().json(docsResponse))
+    .await?;
+    Ok(HttpResponse::Ok().body("Refuse document successfully."))
 }
 
 #[get("/docs/{id}")]
@@ -464,18 +522,25 @@ pub async fn Download(
     })?;
 
     // 更新下载次数
-    sqlx::query!("UPDATE docs SET download_count = download_count + 1 WHERE id = $1", *docsID)
+    sqlx::query!(
+        "UPDATE docs SET download_count = download_count + 1 WHERE id = $1",
+        *docsID
+    )
     .execute(pool.get_ref())
     .await
     .map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to update download count.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to update download count.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     RecordLog(claims.id, &pool, format!("Download document ID {}", docsID)).await?;
-    Ok(HttpResponse::Ok().content_type("application/pdf").body(pdf_content))
+    Ok(HttpResponse::Ok()
+        .content_type("application/pdf")
+        .body(pdf_content))
 }
-
 
 #[put("/docs/{id}")]
 pub async fn Edit(
@@ -515,52 +580,101 @@ pub async fn Edit(
     Ok(HttpResponse::Ok().body("Document updated successfully."))
 }
 
-
 #[delete("/docs/{id}")]
 async fn Delete(
     pool: web::Data<PgPool>,
     docsID: web::Path<i64>,
-    request: HttpRequest
+    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-
     let claims = CheckAdmin(&pool, &request).await?;
 
     let mut transaction = pool.begin().await.map(|t| t).map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to start transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to start transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     // Find file_path
     let file_path = sqlx::query!("SELECT file_path FROM docs WHERE id = $1", *docsID)
-    .fetch_one(&mut transaction)
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to find document path.\nDatabase error: {}", err))
-    })?.file_path.unwrap_or_default();
+        .fetch_one(&mut transaction)
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorInternalServerError(format!(
+                "Failed to find document path.\nDatabase error: {}",
+                err
+            ))
+        })?
+        .file_path
+        .unwrap_or_default();
 
     // Delete file path from table
     sqlx::query!("DELETE FROM docs WHERE id = $1", *docsID)
-    .execute(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to delete document.\nDatabase error: {}", err))
-    })?;
+        .execute(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorInternalServerError(format!(
+                "Failed to delete document.\nDatabase error: {}",
+                err
+            ))
+        })?;
 
     transaction.commit().await.map(|_| ()).map_err(|err| {
         println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to commit transaction.\nDatabase error: {}", err))
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to commit transaction.\nDatabase error: {}",
+            err
+        ))
     })?;
 
     // Delete file (PHYSICAL)
     if !file_path.is_empty() {
         tokio::fs::remove_file(&file_path).await.map_err(|err| {
             println!("File delete error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to delete document file from storage")
+            actix_web::error::ErrorInternalServerError(
+                "Failed to delete document file from storage",
+            )
         })?;
     }
 
-    RecordLog(claims.id, &pool, format!("(Administrator) Delete document of ID {}", docsID)).await?;
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Administrator) Delete document of ID {}", docsID),
+    )
+    .await?;
     Ok(HttpResponse::Ok().body("Document deleted successfully."))
 }
+
+// 保存文件并返回路径
+pub async fn save_file(
+    content: &Vec<u8>,
+    upload_dir: &str,
+    file_type: &str,
+) -> Result<String, std::io::Error> {
+    // 确保上传目录存在
+    fs::create_dir_all(upload_dir).await?;
+
+    // 生成唯一文件名
+    let file_name = format!("{}.{}", Uuid::new_v4(), file_type);
+    let file_path = format!("{}/{}", upload_dir, file_name);
+
+    // 将内容写入文件
+    let mut file = File::create(&file_path).await?;
+    file.write_all(content).await?;
+
+    Ok(file_path)
+}
+
+// fn base64_to_vec<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+// where
+//     D: serde::Deserializer<'de>,
+// {
+//     let base64_str = String::deserialize(deserializer)?; // 获取 Base64 字符串
+//     general_purpose::STANDARD
+//         .decode(&base64_str) // 使用新的 Engine API
+//         .map_err(serde::de::Error::custom) // 解码错误处理
+// }
