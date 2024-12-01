@@ -64,171 +64,6 @@ struct DocumentResponse {
     download_count: i32,
 }
 
-#[post("/docs")]
-pub async fn Add(
-    pool: web::Data<PgPool>,
-    docsReq: Json<DocumentRequest>,
-    request: HttpRequest,
-) -> Result<HttpResponse, actix_web::Error> {
-    let claims = CheckUser(&pool, &request).await?;
-
-    // 保存文件到服务器并获取文件路径
-    let file_path = save_file(&docsReq.pdfContent, "./uploads/docs", "pdf")
-        .await
-        .map_err(|err| {
-            println!("File save error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to save PDF file")
-        })?;
-
-    if Role::toRole(claims.role).unwrap() == Role::Admin {
-        // 管理员直接保存到 docs 表
-        sqlx::query!(
-            "INSERT INTO docs (title, author, doc_type, file_path, publish_date, uploaded_by, download_count, upload_time) 
-                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
-            &docsReq.title,
-            &docsReq.author,
-            &docsReq.docType,
-            &file_path,
-            &docsReq.publishDate,
-            claims.id
-        )
-        .execute(pool.get_ref())
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to insert into docs table")
-        })?;
-    } else {
-        // 普通用户保存到 buff 表
-        sqlx::query!(
-            "INSERT INTO buff (title, author, doc_type, file_path, publish_date, uploaded_by, download_count, upload_time) 
-                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
-            &docsReq.title,
-            &docsReq.author,
-            &docsReq.docType,
-            &file_path,
-            &docsReq.publishDate,
-            claims.id
-        )
-        .execute(pool.get_ref())
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to insert into buff table")
-        })?;
-    }
-
-    RecordLog(
-        claims.id,
-        &pool,
-        format!("Upload document '{}'", docsReq.title),
-    )
-    .await
-    .map_err(|err| {
-        println!("Log record error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to record log")
-    })?;
-
-    Ok(HttpResponse::Ok().body("Document uploaded successfully."))
-}
-
-#[get("/docs/buffer")]
-pub async fn GetBuffer(
-    pool: web::Data<PgPool>,
-    request: HttpRequest,
-) -> Result<HttpResponse, Error> {
-    let claims = CheckAdmin(&pool, &request).await?;
-
-    let documents = sqlx::query!("
-        SELECT buff.id, buff.title, buff.author, \"user\".username AS uploaded_by, buff.doc_type, buff.publish_date, buff.upload_time, buff.download_count
-        FROM buff
-        JOIN \"user\" ON \"user\".id = buff.uploaded_by"
-    )
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
-    })?;
-
-    let docsResponse: Vec<DocumentResponse> = documents
-        .into_iter()
-        .map(|doc| DocumentResponse {
-            id: doc.id,
-            title: doc.title.unwrap_or_default(),
-            author: doc.author.unwrap_or_default(),
-            uploadedBy: doc.uploaded_by.unwrap_or_default(),
-            docType: doc.doc_type.unwrap_or_default(),
-            publishDate: doc
-                .publish_date
-                .unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
-            upload_date: doc
-                .upload_time
-                .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-                .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
-            download_count: doc.download_count.unwrap_or(0),
-        })
-        .collect();
-
-    RecordLog(
-        claims.id,
-        &pool,
-        format!("(Admininstrator) Request for documents in buffer"),
-    )
-    .await?;
-    Ok(HttpResponse::Ok().json(docsResponse))
-}
-
-#[get("/docs/all")]
-pub async fn List(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
-    let userID: i64 = match UnwrapToken(&pool, &request).await {
-        Ok(claims) => claims.id,
-        Err(_) => 0,
-    };
-
-    let documents = sqlx::query!("
-        SELECT docs.id, docs.title, docs.author, \"user\".username AS uploaded_by, docs.doc_type, docs.publish_date, docs.upload_time, docs.download_count
-        FROM docs
-        JOIN \"user\" ON \"user\".id = docs.uploaded_by"
-    )
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
-    })?;
-
-    let docsResponse: Vec<DocumentResponse> = documents
-        .into_iter()
-        .map(|doc| DocumentResponse {
-            id: doc.id,
-            title: doc.title.unwrap_or_default(),
-            author: doc.author.unwrap_or_default(),
-            uploadedBy: doc.uploaded_by.unwrap_or_default(),
-            docType: doc.doc_type.unwrap_or_default(),
-            publishDate: doc
-                .publish_date
-                .unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
-            upload_date: doc
-                .upload_time
-                .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-                .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
-            download_count: doc.download_count.unwrap_or(0),
-        })
-        .collect();
-
-    RecordLog(
-        userID,
-        &pool,
-        format!(
-            "{} Request for document list",
-            if userID == 0 { "(Guest)" } else { "" }
-        ),
-    )
-    .await?;
-    Ok(HttpResponse::Ok().json(docsResponse))
-}
-
 #[get("/docs/buffer/{id}")]
 pub async fn DownloadBuffer(
     pool: web::Data<PgPool>,
@@ -678,3 +513,168 @@ pub async fn save_file(
 //         .decode(&base64_str) // 使用新的 Engine API
 //         .map_err(serde::de::Error::custom) // 解码错误处理
 // }
+
+#[post("/docs")]
+pub async fn Add(
+    pool: web::Data<PgPool>,
+    docsReq: Json<DocumentRequest>,
+    request: HttpRequest,
+) -> Result<HttpResponse, actix_web::Error> {
+    let claims = CheckUser(&pool, &request).await?;
+
+    // 保存文件到服务器并获取文件路径
+    let file_path = save_file(&docsReq.pdfContent, "./uploads/docs", "pdf")
+        .await
+        .map_err(|err| {
+            println!("File save error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to save PDF file")
+        })?;
+
+    if Role::toRole(claims.role).unwrap() == Role::Admin {
+        // 管理员直接保存到 docs 表
+        sqlx::query!(
+            "INSERT INTO docs (title, author, doc_type, file_path, publish_date, uploaded_by, download_count, upload_time) 
+                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
+            &docsReq.title,
+            &docsReq.author,
+            &docsReq.docType,
+            &file_path,
+            &docsReq.publishDate,
+            claims.id
+        )
+        .execute(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to insert into docs table")
+        })?;
+    } else {
+        // 普通用户保存到 buff 表
+        sqlx::query!(
+            "INSERT INTO buff (title, author, doc_type, file_path, publish_date, uploaded_by, download_count, upload_time) 
+                VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())",
+            &docsReq.title,
+            &docsReq.author,
+            &docsReq.docType,
+            &file_path,
+            &docsReq.publishDate,
+            claims.id
+        )
+        .execute(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to insert into buff table")
+        })?;
+    }
+
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("Upload document '{}'", docsReq.title),
+    )
+    .await
+    .map_err(|err| {
+        println!("Log record error: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to record log")
+    })?;
+
+    Ok(HttpResponse::Ok().body("Document uploaded successfully."))
+}
+
+#[get("/docs/buffer")]
+pub async fn GetBuffer(
+    pool: web::Data<PgPool>,
+    request: HttpRequest,
+) -> Result<HttpResponse, Error> {
+    let claims = CheckAdmin(&pool, &request).await?;
+
+    let documents = sqlx::query!("
+        SELECT buff.id, buff.title, buff.author, \"user\".username AS uploaded_by, buff.doc_type, buff.publish_date, buff.upload_time, buff.download_count
+        FROM buff
+        JOIN \"user\" ON \"user\".id = buff.uploaded_by"
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
+    })?;
+
+    let docsResponse: Vec<DocumentResponse> = documents
+        .into_iter()
+        .map(|doc| DocumentResponse {
+            id: doc.id,
+            title: doc.title.unwrap_or_default(),
+            author: doc.author.unwrap_or_default(),
+            uploadedBy: doc.uploaded_by.unwrap_or_default(),
+            docType: doc.doc_type.unwrap_or_default(),
+            publishDate: doc
+                .publish_date
+                .unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc
+                .upload_time
+                .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+                .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
+            download_count: doc.download_count.unwrap_or(0),
+        })
+        .collect();
+
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Admininstrator) Request for documents in buffer"),
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(docsResponse))
+}
+
+#[get("/docs/all")]
+pub async fn List(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
+    let userID: i64 = match UnwrapToken(&pool, &request).await {
+        Ok(claims) => claims.id,
+        Err(_) => 0,
+    };
+
+    let documents = sqlx::query!("
+        SELECT docs.id, docs.title, docs.author, \"user\".username AS uploaded_by, docs.doc_type, docs.publish_date, docs.upload_time, docs.download_count
+        FROM docs
+        JOIN \"user\" ON \"user\".id = docs.uploaded_by"
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorInternalServerError(format!("Failed to retrieve documents.\nDatabase error: {}", err))
+    })?;
+
+    let docsResponse: Vec<DocumentResponse> = documents
+        .into_iter()
+        .map(|doc| DocumentResponse {
+            id: doc.id,
+            title: doc.title.unwrap_or_default(),
+            author: doc.author.unwrap_or_default(),
+            uploadedBy: doc.uploaded_by.unwrap_or_default(),
+            docType: doc.doc_type.unwrap_or_default(),
+            publishDate: doc
+                .publish_date
+                .unwrap_or(Date::from_calendar_date(0, Month::January, 1).unwrap()),
+            upload_date: doc
+                .upload_time
+                .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+                .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
+            download_count: doc.download_count.unwrap_or(0),
+        })
+        .collect();
+
+    RecordLog(
+        userID,
+        &pool,
+        format!(
+            "{} Request for document list",
+            if userID == 0 { "(Guest)" } else { "" }
+        ),
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(docsResponse))
+}
