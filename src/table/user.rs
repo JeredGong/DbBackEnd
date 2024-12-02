@@ -39,11 +39,88 @@ impl Role {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, Deserialize)]
 pub struct Claims {
     pub id: i64,
     pub role: i16,
     pub exp: u64,
+}
+/**
+ * retrive specified user info, admin only
+ * @param pool      alias to Postgres
+ * @param request   httprequest
+ * @return          user info in `Result`
+ */
+#[get("/user/info")]
+pub async fn GetInfo(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
+    let claims = CheckUser(&pool, &request).await?;
+
+    let user = sqlx::query!(
+        "SELECT id, username, email, role, image FROM \"user\" WHERE id = $1",
+        &claims.id
+    )
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
+    })?;
+
+    let mut image_file = Vec::default();
+
+    if user.image != None {
+        let file_path = user.image.unwrap_or_default();
+        image_file = tokio::fs::read(&file_path).await.map_err(|err| {
+            println!("Image read error: {:?}", err);
+            actix_web::error::ErrorInternalServerError("Failed to read image file")
+        })?;
+    }
+
+    let userResponse: UsersResponse = UsersResponse {
+        id: user.id,
+        username: user.username.unwrap_or_default(),
+        email: user.email.unwrap_or_default(),
+        role: user.role.unwrap_or_default(),
+        image: image_file,
+    };
+
+    RecordLog(claims.id, &pool, format!("Fetch user information")).await?;
+    Ok(HttpResponse::Ok().json(userResponse))
+}
+/**
+ * retrive specified user image, admin only
+ * @param pool      alias to Postgres
+ * @param request   httprequest
+ * @return          user image in `Result`
+ */
+#[get("/user/image")]
+pub async fn GetUserImage(
+    pool: web::Data<PgPool>,
+    request: HttpRequest,
+) -> Result<HttpResponse, Error> {
+    let claims = CheckUser(&pool, &request).await?;
+
+    let image = sqlx::query!("SELECT image FROM \"user\" WHERE id = $1", claims.id)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|err| {
+            println!("Database error: {:?}", err);
+            actix_web::error::ErrorForbidden(format!(
+                "Fetch image failed.\nDatabase error: {}",
+                err
+            ))
+        })?;
+
+    let file_path = image.image.unwrap_or_default();
+    let image_file = tokio::fs::read(&file_path).await.map_err(|err| {
+        println!("Image read error: {:?}", err);
+        actix_web::error::ErrorInternalServerError("Failed to read image file")
+    })?;
+
+    RecordLog(claims.id, &pool, format!("Fetch self image")).await?;
+    Ok(HttpResponse::Ok()
+        .content_type("application/png")
+        .body(image_file))
 }
 
 #[get("/user/info/{id}")]
@@ -91,7 +168,13 @@ pub async fn GetInfoByID(
     .await?;
     Ok(HttpResponse::Ok().json(userResponse))
 }
-
+/**
+ * retrive specified user info, admin only
+ * @param pool      alias to Postgres
+ * @param userID          the specified user
+ * @param request   httprequest
+ * @return          specified user's image in `Result`
+ */
 #[get("/user/image/{id}")]
 pub async fn GetImage(
     pool: web::Data<PgPool>,
@@ -130,7 +213,13 @@ pub async fn GetImage(
         .content_type("application/png")
         .body(image_file))
 }
-
+/**
+ * change avatar, user permitted
+ * @param pool      alias to Postgres
+ * @param imageReq  new image in Json format
+ * @param request   httprequest
+ * @return          success or not in `Result`
+ */
 #[put("/user/image")]
 pub async fn ModifyImage(
     pool: web::Data<PgPool>,
@@ -211,7 +300,13 @@ pub async fn ModifyImage(
     RecordLog(claims.id, &pool, "Modify image".to_string()).await?;
     Ok(HttpResponse::Ok().body("User image modified successfully."))
 }
-
+/**
+ * change password, user permitted
+ * @param pool      alias to Postgres
+ * @param passwdReq new password in Json format
+ * @param request   httprequest
+ * @return          succuess or not in `Result`
+ */
 #[put("/user/password")]
 pub async fn ModifyPasswd(
     pool: web::Data<PgPool>,
@@ -239,7 +334,13 @@ pub async fn ModifyPasswd(
     RecordLog(claims.id, &pool, format!("Modify password")).await?;
     Ok(HttpResponse::Ok().body("User password modified success."))
 }
-
+/**
+ * change user email, user permitted
+ * @param pool      alias to Postgres
+ * @param emailReq  new email in Json format
+ * @param request   httprequest
+ * @return          success or not in `Result`
+ */
 #[put("/user/email")]
 pub async fn ModifyEmail(
     pool: web::Data<PgPool>,
@@ -266,7 +367,13 @@ pub async fn ModifyEmail(
     RecordLog(claims.id, &pool, format!("Modify email")).await?;
     Ok(HttpResponse::Ok().body("User email modified success."))
 }
-
+/**
+ * chaneg uername, user permitted
+ * @param pool      alias to Postgres
+ * @usernameReq     new username in Json format
+ * @param request   httprequest
+ * @return          user info in `Result`
+ */
 #[put("/user/username")]
 pub async fn ModifyUsername(
     pool: web::Data<PgPool>,
@@ -404,227 +511,6 @@ pub async fn Upgrade(
     Ok(HttpResponse::Ok().body("Upgrade user successfully."))
 }
 
-#[post("/user/dngrade/{id}")]
-pub async fn Dngrade(
-    pool: web::Data<PgPool>,
-    userID: web::Path<i64>,
-    request: HttpRequest,
-) -> Result<HttpResponse, Error> {
-    let claims = CheckAdmin(&pool, &request).await?;
-
-    if claims.id == *userID {
-        return Err(actix_web::error::ErrorForbidden(
-            "Administrators cannot self-dngrade.",
-        ));
-    }
-
-    sqlx::query!("UPDATE \"user\" SET role = $1 WHERE id = $2", 1, *userID)
-        .execute(pool.get_ref())
-        .await
-        .map_err(|err| {
-            println!("Database error: {:?}", err);
-            actix_web::error::ErrorInternalServerError(format!(
-                "Degrade user failed.\nDatabase error: {}",
-                err
-            ))
-        })?;
-
-    RecordLog(
-        claims.id,
-        &pool,
-        format!("(Administrator) Dngrade user of ID {}", *userID),
-    )
-    .await?;
-    Ok(HttpResponse::Ok().body("Dngrade user successfully."))
-}
-
-pub async fn UnwrapToken(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
-    let key = std::env::var("ENCODING_KEY").unwrap_or_default();
-
-    let validation = Validation::default();
-
-    // Decode and unwrap for claims in token
-    if let Some(authorHeader) = request.headers().get("Authorization") {
-        if let Ok(authorString) = authorHeader.to_str() {
-            if let Some(token) = authorString.strip_prefix("Bearer ") {
-                return match decode::<Claims>(
-                    token,
-                    &DecodingKey::from_secret(key.as_ref()),
-                    &validation,
-                ) {
-                    Ok(data) => {
-                        let claims: Claims = data.claims;
-                        let role =
-                            sqlx::query!("SELECT role FROM \"user\" WHERE id = $1", &claims.id)
-                                .fetch_one(pool)
-                                .await
-                                .map_err(|err| {
-                                    println!("Database error: {:?}", err);
-                                    actix_web::error::ErrorNotFound(format!(
-                                        "User not found.\nDatabase error: {}",
-                                        err
-                                    ))
-                                })?;
-                        if claims.role == role.role.unwrap_or_default() {
-                            Ok(claims)
-                        } else {
-                            Err(actix_web::error::ErrorUnauthorized(
-                                "User role unmatched with database. Please re-login.",
-                            ))
-                        }
-                    }
-                    Err(err) => {
-                        println!("Decode error: {:?}", err);
-                        Err(actix_web::error::ErrorBadRequest(format!(
-                            "Decode failed.\nDecode error: {}",
-                            err
-                        )))
-                    }
-                };
-            }
-        }
-    }
-
-    Err(actix_web::error::ErrorBadRequest(
-        "Failed to fetch and parse token.",
-    ))
-}
-
-
-pub async fn CheckAdmin(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
-    let claims = UnwrapToken(pool, request).await?;
-    if !CheckIs(&claims, Role::Admin)? {
-        return Err(actix_web::error::ErrorUnauthorized(
-            "Only admins can perform this action.",
-        ));
-    }
-    Ok(claims)
-}
-
-pub fn CheckIs(claims: &Claims, roleCheck: Role) -> Result<bool, Error> {
-    match Role::toRole(claims.role) {
-        Some(role) => {
-            if role == roleCheck {
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        }
-        _ => Err(actix_web::error::ErrorUnauthorized("Role invalid.")),
-    }
-}
-
-pub async fn CheckUser(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
-    let claims = UnwrapToken(pool, &request)
-        .await
-        .map_err(|_| actix_web::error::ErrorUnauthorized("Only users can perform this action."))?;
-
-    Ok(claims)
-}
-
-#[derive(serde::Deserialize)]
-struct LoginRequest {
-    username: String,
-    password_hash: String,
-}
-
-#[derive(serde::Deserialize)]
-struct UsersRequest {
-    username: String,
-    password_hash: String,
-    email: String,
-    role: i16,
-    image: Vec<u8>, // 使用 Vec<u8> 存储二进制图像数据
-}
-
-#[derive(serde::Serialize)]
-struct UsersResponse {
-    id: i64,
-    username: String,
-    email: String,
-    role: i16,
-    image: Vec<u8>,
-}
-
-#[derive(serde::Deserialize)]
-struct ModifyRequest {
-    image: Vec<u8>,
-}
-
-#[derive(serde::Deserialize)]
-struct PasswordRequest {
-    old_password_hash: String,
-    password_hash: String,
-}
-
-#[derive(serde::Deserialize)]
-struct EmailRequest {
-    email: String,
-}
-
-#[derive(Deserialize)]
-struct UsernameRequest {
-    username: String,
-}
-
-#[post("/user/login")]
-pub async fn Login(
-    pool: web::Data<PgPool>,
-    usersReq: Json<LoginRequest>,
-) -> Result<HttpResponse, Error> {
-    // Get user infomation from database
-    let user = sqlx::query!(
-        "SELECT id, username, password_hash, role FROM \"user\" WHERE username = $1",
-        &usersReq.username
-    )
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorNotFound(format!("User not found.\nDatabase error: {}", err))
-    })?;
-
-    // Check whether password hash is valid
-    if let Some(stored_hash) = user.password_hash {
-        if usersReq.password_hash != stored_hash {
-            return Err(actix_web::error::ErrorUnauthorized("Invalid password."));
-        }
-    } else {
-        return Err(actix_web::error::ErrorNotFound("Password not found."));
-    }
-
-    // Token expiration timestamp
-    let expiration = Utc::now()
-        .checked_add_signed(Duration::minutes(90))
-        .unwrap_or_default()
-        .timestamp() as u64;
-
-    let claims: Claims = Claims {
-        id: user.id,
-        role: user.role.unwrap_or_default() as i16,
-        exp: expiration,
-    };
-
-    let key = std::env::var("ENCODING_KEY").unwrap_or_default();
-
-    // Calculate token (HS256 algorithm)
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(key.as_ref()),
-    )
-    .map_err(|err| {
-        println!("JWT token error: {:?}", err);
-        actix_web::error::ErrorInternalServerError(format!(
-            "Failed to create Token.\nDatabase error: {}",
-            err
-        ))
-    })?;
-
-    RecordLog(user.id, &pool, format!("User Login")).await?;
-    Ok(HttpResponse::Ok().body(token))
-}
-
 #[post("/user/register")]
 pub async fn Register(
     pool: web::Data<PgPool>,
@@ -695,69 +581,253 @@ pub async fn Register(
     Ok(HttpResponse::Ok().body("Register success."))
 }
 
-#[get("/user/info")]
-pub async fn GetInfo(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
-    let claims = CheckUser(&pool, &request).await?;
+// Endpoint for downgrading a user's role (only admins can downgrade others)
+#[post("/user/dngrade/{id}")]
+pub async fn Dngrade(
+    pool: web::Data<PgPool>, // Database pool for database interaction
+    userID: web::Path<i64>, // Path parameter for the user ID to downgrade
+    request: HttpRequest, // HTTP request containing authentication info
+) -> Result<HttpResponse, Error> {
+    // Check if the user making the request is an admin
+    let claims = CheckAdmin(&pool, &request).await?;
 
-    let user = sqlx::query!(
-        "SELECT id, username, email, role, image FROM \"user\" WHERE id = $1",
-        &claims.id
-    )
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|err| {
-        println!("Database error: {:?}", err);
-        actix_web::error::ErrorForbidden(format!("Insert failed.\nDatabase error: {}", err))
-    })?;
-
-    let mut image_file = Vec::default();
-
-    if user.image != None {
-        let file_path = user.image.unwrap_or_default();
-        image_file = tokio::fs::read(&file_path).await.map_err(|err| {
-            println!("Image read error: {:?}", err);
-            actix_web::error::ErrorInternalServerError("Failed to read image file")
-        })?;
+    // Prevent admins from downgrading their own role
+    if claims.id == *userID {
+        return Err(actix_web::error::ErrorForbidden(
+            "Administrators cannot self-dngrade.",
+        ));
     }
 
-    let userResponse: UsersResponse = UsersResponse {
-        id: user.id,
-        username: user.username.unwrap_or_default(),
-        email: user.email.unwrap_or_default(),
-        role: user.role.unwrap_or_default(),
-        image: image_file,
-    };
-
-    RecordLog(claims.id, &pool, format!("Fetch user information")).await?;
-    Ok(HttpResponse::Ok().json(userResponse))
-}
-
-#[get("/user/image")]
-pub async fn GetUserImage(
-    pool: web::Data<PgPool>,
-    request: HttpRequest,
-) -> Result<HttpResponse, Error> {
-    let claims = CheckUser(&pool, &request).await?;
-
-    let image = sqlx::query!("SELECT image FROM \"user\" WHERE id = $1", claims.id)
-        .fetch_one(pool.get_ref())
+    // Update the role of the user to a lower role (role 1 is likely "user")
+    sqlx::query!("UPDATE \"user\" SET role = $1 WHERE id = $2", 1, *userID)
+        .execute(pool.get_ref()) // Execute the update query
         .await
         .map_err(|err| {
             println!("Database error: {:?}", err);
-            actix_web::error::ErrorForbidden(format!(
-                "Fetch image failed.\nDatabase error: {}",
+            // Return an internal server error if the query fails
+            actix_web::error::ErrorInternalServerError(format!(
+                "Degrade user failed.\nDatabase error: {}",
                 err
             ))
         })?;
 
-    let file_path = image.image.unwrap_or_default();
-    let image_file = tokio::fs::read(&file_path).await.map_err(|err| {
-        println!("Image read error: {:?}", err);
-        actix_web::error::ErrorInternalServerError("Failed to read image file")
+    // Log the downgrade action by the administrator
+    RecordLog(
+        claims.id,
+        &pool,
+        format!("(Administrator) Dngrade user of ID {}", *userID),
+    )
+    .await?;
+    
+    // Return a success response
+    Ok(HttpResponse::Ok().body("Dngrade user successfully."))
+}
+
+// Helper function to unwrap the token and return claims
+pub async fn UnwrapToken(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
+    // Retrieve the secret key for decoding the token from the environment
+    let key = std::env::var("ENCODING_KEY").unwrap_or_default();
+
+    let validation = Validation::default();
+
+    // Check if the Authorization header is present in the request
+    if let Some(authorHeader) = request.headers().get("Authorization") {
+        if let Ok(authorString) = authorHeader.to_str() {
+            if let Some(token) = authorString.strip_prefix("Bearer ") {
+                return match decode::<Claims>(
+                    token,
+                    &DecodingKey::from_secret(key.as_ref()), // Decode the token with the secret key
+                    &validation,
+                ) {
+                    Ok(data) => {
+                        let claims: Claims = data.claims;
+                        // Verify that the role in the token matches the role in the database
+                        let role =
+                            sqlx::query!("SELECT role FROM \"user\" WHERE id = $1", &claims.id)
+                                .fetch_one(pool)
+                                .await
+                                .map_err(|err| {
+                                    println!("Database error: {:?}", err);
+                                    // Return an error if the user is not found in the database
+                                    actix_web::error::ErrorNotFound(format!(
+                                        "User not found.\nDatabase error: {}",
+                                        err
+                                    ))
+                                })?;
+                        if claims.role == role.role.unwrap_or_default() {
+                            Ok(claims) // Return the claims if the role matches
+                        } else {
+                            Err(actix_web::error::ErrorUnauthorized(
+                                "User role unmatched with database. Please re-login.",
+                            ))
+                        }
+                    }
+                    Err(err) => {
+                        println!("Decode error: {:?}", err);
+                        // Return an error if the token is invalid or decoding fails
+                        Err(actix_web::error::ErrorBadRequest(format!(
+                            "Decode failed.\nDecode error: {}",
+                            err
+                        )))
+                    }
+                };
+            }
+        }
+    }
+
+    // Return an error if the Authorization header is missing or malformed
+    Err(actix_web::error::ErrorBadRequest(
+        "Failed to fetch and parse token.",
+    ))
+}
+
+// Check if the request is made by an admin user
+pub async fn CheckAdmin(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
+    let claims = UnwrapToken(pool, request).await?;
+    if !CheckIs(&claims, Role::Admin)? {
+        // Return an error if the user is not an admin
+        return Err(actix_web::error::ErrorUnauthorized(
+            "Only admins can perform this action.",
+        ));
+    }
+    Ok(claims) // Return claims if the user is an admin
+}
+
+// Helper function to check if the user has the specified role
+pub fn CheckIs(claims: &Claims, roleCheck: Role) -> Result<bool, Error> {
+    match Role::toRole(claims.role) {
+        Some(role) => {
+            if role == roleCheck {
+                Ok(true) // Return true if the role matches
+            } else {
+                Ok(false) // Return false if the role doesn't match
+            }
+        }
+        _ => Err(actix_web::error::ErrorUnauthorized("Role invalid.")), // Return an error if the role is invalid
+    }
+}
+
+// Check if the request is made by a regular user
+pub async fn CheckUser(pool: &PgPool, request: &HttpRequest) -> Result<Claims, Error> {
+    let claims = UnwrapToken(pool, &request)
+        .await
+        .map_err(|_| actix_web::error::ErrorUnauthorized("Only users can perform this action."))?;
+    Ok(claims) // Return claims for a regular user
+}
+
+// Struct for user login request
+#[derive(serde::Deserialize)]
+struct LoginRequest {
+    username: String,
+    password_hash: String,
+}
+
+// Struct for user creation or modification request
+#[derive(serde::Deserialize)]
+struct UsersRequest {
+    username: String,
+    password_hash: String,
+    email: String,
+    role: i16,
+    image: Vec<u8>, // Store the image as binary data (Vec<u8>)
+}
+
+// Struct for user information response
+#[derive(serde::Serialize)]
+struct UsersResponse {
+    id: i64,
+    username: String,
+    email: String,
+    role: i16,
+    image: Vec<u8>,
+}
+
+// Struct for modifying a user's image
+#[derive(serde::Deserialize)]
+struct ModifyRequest {
+    image: Vec<u8>, // New image as binary data
+}
+
+// Struct for changing user password
+#[derive(serde::Deserialize)]
+struct PasswordRequest {
+    old_password_hash: String,
+    password_hash: String,
+}
+
+// Struct for updating user email
+#[derive(serde::Deserialize)]
+struct EmailRequest {
+    email: String,
+}
+
+// Struct for updating username
+#[derive(serde::Deserialize)]
+struct UsernameRequest {
+    username: String,
+}
+
+// Endpoint for user login (authentication)
+#[post("/user/login")]
+pub async fn Login(
+    pool: web::Data<PgPool>, // Database pool for fetching user data
+    usersReq: Json<LoginRequest>, // JSON body containing login request data
+) -> Result<HttpResponse, Error> {
+    // Fetch user information from the database based on the provided username
+    let user = sqlx::query!(
+        "SELECT id, username, password_hash, role FROM \"user\" WHERE username = $1",
+        &usersReq.username
+    )
+    .fetch_one(pool.get_ref()) // Execute query
+    .await
+    .map_err(|err| {
+        println!("Database error: {:?}", err);
+        // Return an error if the user is not found in the database
+        actix_web::error::ErrorNotFound(format!("User not found.\nDatabase error: {}", err))
     })?;
 
-    RecordLog(claims.id, &pool, format!("Fetch self image")).await?;
-    Ok(HttpResponse::Ok()
-        .content_type("application/png")
-        .body(image_file))
+    // Check if the provided password matches the stored password hash
+    if let Some(stored_hash) = user.password_hash {
+        if usersReq.password_hash != stored_hash {
+            return Err(actix_web::error::ErrorUnauthorized("Invalid password.")); // Return an error if passwords don't match
+        }
+    } else {
+        return Err(actix_web::error::ErrorNotFound("Password not found.")); // Return an error if password is not found
+    }
+
+    // Set token expiration to 90 minutes
+    let expiration = Utc::now()
+        .checked_add_signed(Duration::minutes(90)) // Set token expiration time
+        .unwrap_or_default()
+        .timestamp() as u64;
+
+    // Create claims for the user (id, role, and expiration)
+    let claims: Claims = Claims {
+        id: user.id,
+        role: user.role.unwrap_or_default() as i16,
+        exp: expiration,
+    };
+
+    let key = std::env::var("ENCODING_KEY").unwrap_or_default(); // Fetch the secret key from environment
+
+    // Generate JWT token (HS256 algorithm)
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(key.as_ref()), // Encode the token with the secret key
+    )
+    .map_err(|err| {
+        println!("JWT token error: {:?}", err);
+        // Return an error if the token generation fails
+        actix_web::error::ErrorInternalServerError(format!(
+            "Failed to create Token.\nDatabase error: {}",
+            err
+        ))
+    })?;
+
+    // Log the user login event
+    RecordLog(user.id, &pool, format!("User Login")).await?;
+
+    // Return the generated JWT token as the response
+    Ok(HttpResponse::Ok().body(token))
 }
