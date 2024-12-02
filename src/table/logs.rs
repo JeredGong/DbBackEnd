@@ -1,11 +1,11 @@
-use super::user::CheckAdmin;
+use super::user::CheckAdmin; 
 use actix_web::{
     get,
     web::{self},
     Error, HttpRequest, HttpResponse,
-};
-use sqlx::PgPool;
-use time::{OffsetDateTime, UtcOffset};
+}; 
+use sqlx::PgPool; 
+use time::{OffsetDateTime, UtcOffset}; 
 
 /*
  *  PostgreSQL schema
@@ -34,30 +34,30 @@ pub async fn RecordLog(userID: i64, pool: &web::Data<PgPool>, action: String) ->
     .execute(pool.get_ref())
     .await
     .map_err(|err| {
-        println!("Database error: {:?}", err);
+        println!("Database error: {:?}", err); 
         actix_web::error::ErrorInternalServerError(format!(
             "Failed to insert log.\nDatabase error: {}",
             err
         ))
-    })?;
+    })?; 
 
     Ok(())
 }
 
 #[get("/logs")]
 pub async fn Logs(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpResponse, Error> {
-    let claims = CheckAdmin(&pool, &request).await?;
+    let claims = CheckAdmin(&pool, &request).await?; 
 
     let logs = sqlx::query!("SELECT id, user_id, action, log_time FROM logs")
         .fetch_all(pool.get_ref())
         .await
         .map_err(|err| {
-            println!("Database error: {:?}", err);
+            println!("Database error: {:?}", err); 
             actix_web::error::ErrorInternalServerError(format!(
                 "Failed to fetch logs.\nDatabase error: {}",
                 err
             ))
-        })?;
+        })?; 
 
     let logResponse: Vec<LogResponse> = logs
         .into_iter()
@@ -70,13 +70,13 @@ pub async fn Logs(pool: web::Data<PgPool>, request: HttpRequest) -> Result<HttpR
                 .unwrap_or(OffsetDateTime::UNIX_EPOCH)
                 .to_offset(UtcOffset::from_hms(8, 0, 0).unwrap()),
         })
-        .collect();
+        .collect(); 
 
     RecordLog(
         claims.id,
         &pool,
         format!("(Administrator) Request for logs"),
     )
-    .await?;
+    .await?; 
     Ok(HttpResponse::Ok().json(logResponse))
 }
